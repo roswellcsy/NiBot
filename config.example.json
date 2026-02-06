@@ -1,0 +1,47 @@
+{
+  "agent": {
+    "name": "NiBot",
+    "model": "anthropic/claude-sonnet-4-5-20250929",
+    "maxTokens": 4096,
+    "temperature": 0.7,
+    "maxIterations": 20,
+    "workspace": "~/.nibot/workspace"
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "allowFrom": []
+    },
+    "feishu": {
+      "enabled": false,
+      "appId": "",
+      "appSecret": "",
+      "encryptKey": "",
+      "allowFrom": []
+    }
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "",
+      "apiBase": ""
+    },
+    "openai": {
+      "apiKey": "",
+      "apiBase": ""
+    },
+    "openrouter": {
+      "apiKey": "",
+      "apiBase": ""
+    },
+    "deepseek": {
+      "apiKey": "",
+      "apiBase": ""
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": true,
+    "execTimeout": 60,
+    "webSearchApiKey": ""
+  }
+}
