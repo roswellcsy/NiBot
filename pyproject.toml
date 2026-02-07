@@ -29,3 +29,17 @@ nibot = "nibot.__main__:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line length handled by formatter
+    "E741",  # ambiguous variable name (we use l, O, etc. intentionally)
+]
+
+[tool.ruff.format]
+quote-style = "double"
