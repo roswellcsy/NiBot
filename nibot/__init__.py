@@ -1,6 +1,6 @@
 """NiBot - Lightweight multi-channel AI agent framework."""
 
-from nibot.types import Envelope, ToolCall, ToolResult, LLMResponse, SkillSpec
+from nibot.types import Envelope, ToolCall, ToolResult, ToolContext, LLMResponse, SkillSpec
 from nibot.registry import Tool, ToolRegistry
 from nibot.channel import BaseChannel
 from nibot.bus import MessageBus
@@ -15,6 +15,7 @@ __all__ = [
     "Envelope",
     "ToolCall",
     "ToolResult",
+    "ToolContext",
     "LLMResponse",
     "SkillSpec",
 ]

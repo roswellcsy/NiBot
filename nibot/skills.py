@@ -45,6 +45,11 @@ class SkillsLoader:
     def get(self, name: str) -> SkillSpec | None:
         return self._specs.get(name)
 
+    def reload(self) -> None:
+        """Clear and re-load all skills. Safe: no await between clear/load (atomic in asyncio)."""
+        self._specs.clear()
+        self.load_all()
+
     def build_summary(self) -> str:
         """XML summary of non-always skills for system prompt."""
         non_always = [s for s in self._specs.values() if not s.always]
@@ -89,7 +94,18 @@ class SkillsLoader:
             always=nanobot_meta.get("always", False),
             requires_bins=requires.get("bins", []),
             requires_env=requires.get("env", []),
+            created_at=self._to_str(meta.get("created_at", "")),
+            created_by=str(meta.get("created_by", "")),
+            version=int(meta.get("version", 1)),
         )
+
+    @staticmethod
+    def _to_str(val: object) -> str:
+        if isinstance(val, str):
+            return val
+        if hasattr(val, "isoformat"):
+            return val.isoformat()  # type: ignore[union-attr]
+        return str(val) if val else ""
 
     def _check_requirements(self, spec: SkillSpec) -> bool:
         for b in spec.requires_bins:

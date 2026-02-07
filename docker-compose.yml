@@ -1,0 +1,26 @@
+services:
+  nibot:
+    build: .
+    container_name: nibot
+    restart: unless-stopped
+    volumes:
+      - ./config.json:/home/nibot/.nibot/config.json:ro
+      - nibot-workspace:/home/nibot/.nibot/workspace
+    ports:
+      - "9100:9100"
+    environment:
+      - NIBOT_HEALTH__ENABLED=true
+      - NIBOT_HEALTH__HOST=0.0.0.0
+      - NIBOT_LOG__JSON_FORMAT=true
+      # Provider keys via environment (don't put secrets in config.json)
+      # - NIBOT_PROVIDERS__ANTHROPIC__API_KEY=sk-ant-xxx
+      # - NIBOT_PROVIDERS__OPENAI__API_KEY=sk-xxx
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9100/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  nibot-workspace:

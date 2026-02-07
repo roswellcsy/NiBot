@@ -8,20 +8,21 @@ from typing import Any
 from nibot.registry import Tool
 
 
-def _resolve_path(path: str, workspace: Path) -> Path:
-    """Resolve path, restricting to workspace if configured."""
+def _resolve_path(path: str, workspace: Path, restrict: bool = True) -> Path:
+    """Resolve path. When restrict=True, deny access outside workspace."""
     p = Path(path).expanduser()
     if not p.is_absolute():
         p = workspace / p
     p = p.resolve()
-    if not str(p).startswith(str(workspace.resolve())):
+    if restrict and not p.is_relative_to(workspace.resolve()):
         raise PermissionError(f"Access denied: {p} is outside workspace {workspace}")
     return p
 
 
 class ReadFileTool(Tool):
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, restrict: bool = True) -> None:
         self._workspace = workspace
+        self._restrict = restrict
 
     @property
     def name(self) -> str:
@@ -44,7 +45,7 @@ class ReadFileTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        path = _resolve_path(kwargs["path"], self._workspace)
+        path = _resolve_path(kwargs["path"], self._workspace, self._restrict)
         if not path.exists():
             return f"File not found: {path}"
         text = path.read_text(encoding="utf-8")
@@ -58,8 +59,9 @@ class ReadFileTool(Tool):
 
 
 class WriteFileTool(Tool):
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, restrict: bool = True) -> None:
         self._workspace = workspace
+        self._restrict = restrict
 
     @property
     def name(self) -> str:
@@ -81,15 +83,16 @@ class WriteFileTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        path = _resolve_path(kwargs["path"], self._workspace)
+        path = _resolve_path(kwargs["path"], self._workspace, self._restrict)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(kwargs["content"], encoding="utf-8")
         return f"Written {len(kwargs['content'])} chars to {path}"
 
 
 class EditFileTool(Tool):
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, restrict: bool = True) -> None:
         self._workspace = workspace
+        self._restrict = restrict
 
     @property
     def name(self) -> str:
@@ -112,7 +115,7 @@ class EditFileTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        path = _resolve_path(kwargs["path"], self._workspace)
+        path = _resolve_path(kwargs["path"], self._workspace, self._restrict)
         if not path.exists():
             return f"File not found: {path}"
         content = path.read_text(encoding="utf-8")
@@ -128,8 +131,9 @@ class EditFileTool(Tool):
 
 
 class ListDirTool(Tool):
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, restrict: bool = True) -> None:
         self._workspace = workspace
+        self._restrict = restrict
 
     @property
     def name(self) -> str:
@@ -149,7 +153,7 @@ class ListDirTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        path = _resolve_path(kwargs.get("path", "."), self._workspace)
+        path = _resolve_path(kwargs.get("path", "."), self._workspace, self._restrict)
         if not path.is_dir():
             return f"Not a directory: {path}"
         entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))

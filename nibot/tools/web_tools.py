@@ -2,9 +2,29 @@
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import Any
+from urllib.parse import urlparse
 
 from nibot.registry import Tool
+
+
+def _is_private_url(url: str) -> bool:
+    """Block requests to private/reserved IP ranges (SSRF protection)."""
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        if not hostname:
+            return True
+        addrs = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for _family, _type, _proto, _canon, sockaddr in addrs:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                return True
+    except (socket.gaierror, ValueError):
+        return True
+    return False
 
 
 class WebSearchTool(Tool):
@@ -82,10 +102,16 @@ class WebFetchTool(Tool):
         import httpx
 
         url = kwargs["url"]
+        if _is_private_url(url):
+            return "Error: URL points to a private/reserved address. Blocked for security."
         max_length = kwargs.get("max_length", 20000)
         async with httpx.AsyncClient(follow_redirects=True) as client:
             resp = await client.get(url, timeout=15)
             resp.raise_for_status()
+            # Check final URL after redirects (SSRF: redirect to private IP)
+            final_url = str(resp.url)
+            if final_url != url and _is_private_url(final_url):
+                return "Error: URL redirected to a private/reserved address. Blocked for security."
         text = resp.text
         # Try to extract readable content if lxml is available
         try:

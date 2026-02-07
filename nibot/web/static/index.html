@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NiBot Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;color:#333;padding:20px}
+.container{max-width:1200px;margin:0 auto}
+h1{font-size:24px;margin-bottom:20px;color:#1a1a1a}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:24px}
+.card{background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.card h2{font-size:16px;color:#666;margin-bottom:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+.stat{font-size:32px;font-weight:700;color:#1a1a1a}
+.stat-label{font-size:13px;color:#999;margin-top:4px}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600}
+.badge-ok{background:#e6f4ea;color:#1e7e34}
+.badge-warn{background:#fff3cd;color:#856404}
+.badge-error{background:#f8d7da;color:#721c24}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #eee;font-size:14px}
+th{color:#666;font-weight:600;font-size:12px;text-transform:uppercase}
+.btn{padding:6px 16px;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600}
+.btn-primary{background:#0066cc;color:#fff}
+.btn-danger{background:#dc3545;color:#fff}
+.btn:hover{opacity:.85}
+nav{display:flex;gap:12px;margin-bottom:24px}
+nav a{padding:8px 16px;background:#fff;border-radius:6px;text-decoration:none;color:#333;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+nav a.active{background:#0066cc;color:#fff}
+.loading{color:#999;font-style:italic}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
+</head>
+<body>
+<div class="container" x-data="dashboard()" x-init="init()">
+  <h1>NiBot Dashboard</h1>
+
+  <nav>
+    <a href="#" :class="{'active': tab==='overview'}" @click.prevent="tab='overview'">Overview</a>
+    <a href="#" :class="{'active': tab==='sessions'}" @click.prevent="tab='sessions';loadSessions()">Sessions</a>
+    <a href="#" :class="{'active': tab==='skills'}" @click.prevent="tab='skills';loadSkills()">Skills</a>
+    <a href="#" :class="{'active': tab==='tasks'}" @click.prevent="tab='tasks';loadTasks()">Tasks</a>
+  </nav>
+
+  <!-- Overview -->
+  <div x-show="tab==='overview'">
+    <div class="grid">
+      <div class="card">
+        <h2>Status</h2>
+        <div class="stat">
+          <span class="badge" :class="health.status==='ok'?'badge-ok':'badge-warn'" x-text="health.status||'loading'"></span>
+        </div>
+        <div class="stat-label" x-text="'Model: '+(health.model||'...')"></div>
+      </div>
+      <div class="card">
+        <h2>Sessions</h2>
+        <div class="stat" x-text="health.active_sessions||0"></div>
+        <div class="stat-label">Active</div>
+      </div>
+      <div class="card">
+        <h2>Tasks</h2>
+        <div class="stat" x-text="health.active_tasks||0"></div>
+        <div class="stat-label">Running</div>
+      </div>
+      <div class="card">
+        <h2>Channels</h2>
+        <div class="stat" x-text="(health.channels||[]).length"></div>
+        <div class="stat-label" x-text="(health.channels||[]).join(', ')||'none'"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Analytics</h2>
+      <div class="grid" style="margin-top:12px">
+        <div><span class="stat-label">Sessions analyzed:</span> <strong x-text="analytics.session_count||0"></strong></div>
+        <div><span class="stat-label">Error rate:</span> <strong x-text="((analytics.overall_error_rate||0)*100).toFixed(1)+'%'"></strong></div>
+        <div><span class="stat-label">Avg turns:</span> <strong x-text="(analytics.avg_turns_per_session||0).toFixed(1)"></strong></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sessions -->
+  <div x-show="tab==='sessions'">
+    <div class="card">
+      <h2>Recent Sessions</h2>
+      <table>
+        <tr><th>Key</th><th>Messages</th><th>Tools</th><th>Errors</th><th>Updated</th></tr>
+        <template x-for="s in sessions" :key="s.key">
+          <tr>
+            <td x-text="s.key"></td>
+            <td x-text="s.messages"></td>
+            <td x-text="s.tool_calls"></td>
+            <td x-text="s.errors"></td>
+            <td x-text="s.updated_at"></td>
+          </tr>
+        </template>
+      </table>
+    </div>
+  </div>
+
+  <!-- Skills -->
+  <div x-show="tab==='skills'">
+    <div class="card">
+      <h2>Skills</h2>
+      <table>
+        <tr><th>Name</th><th>Description</th><th>Version</th><th>Always</th></tr>
+        <template x-for="s in skills" :key="s.name">
+          <tr>
+            <td x-text="s.name"></td>
+            <td x-text="s.description"></td>
+            <td x-text="'v'+s.version"></td>
+            <td x-text="s.always?'Yes':'No'"></td>
+          </tr>
+        </template>
+      </table>
+      <p x-show="skills.length===0" class="loading">No skills loaded</p>
+    </div>
+  </div>
+
+  <!-- Tasks -->
+  <div x-show="tab==='tasks'">
+    <div class="card">
+      <h2>Recent Tasks</h2>
+      <table>
+        <tr><th>ID</th><th>Type</th><th>Label</th><th>Status</th><th>Created</th></tr>
+        <template x-for="t in tasks" :key="t.task_id">
+          <tr>
+            <td x-text="t.task_id"></td>
+            <td x-text="t.agent_type"></td>
+            <td x-text="t.label"></td>
+            <td><span class="badge" :class="t.status==='completed'?'badge-ok':t.status==='error'?'badge-error':'badge-warn'" x-text="t.status"></span></td>
+            <td x-text="t.created_at"></td>
+          </tr>
+        </template>
+      </table>
+      <p x-show="tasks.length===0" class="loading">No tasks</p>
+    </div>
+  </div>
+</div>
+
+<script>
+function dashboard(){return{
+  tab:'overview',health:{},analytics:{},sessions:[],skills:[],tasks:[],
+  async init(){
+    await this.loadHealth();
+    await this.loadAnalytics();
+    setInterval(()=>this.loadHealth(),10000);
+  },
+  async api(path){
+    try{const r=await fetch('/api/'+path);return await r.json()}catch(e){return{}}
+  },
+  async loadHealth(){this.health=await this.api('health')},
+  async loadAnalytics(){this.analytics=await this.api('analytics')},
+  async loadSessions(){const d=await this.api('sessions');this.sessions=d.sessions||[]},
+  async loadSkills(){const d=await this.api('skills');this.skills=d.skills||[]},
+  async loadTasks(){const d=await this.api('tasks');this.tasks=d.tasks||[]},
+}}
+</script>
+</body>
+</html>

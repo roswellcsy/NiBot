@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from nibot.bus import MessageBus
@@ -9,6 +10,10 @@ from nibot.channel import BaseChannel
 from nibot.config import TelegramChannelConfig
 from nibot.log import logger
 from nibot.types import Envelope
+
+
+_TG_MAX_LENGTH = 4096
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
 class TelegramChannel(BaseChannel):
@@ -54,9 +59,29 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             return
         try:
-            await self._app.bot.send_message(
-                chat_id=int(envelope.chat_id),
-                text=envelope.content,
-            )
+            chat_id = int(envelope.chat_id)
+            # Send media first
+            for media_path in (envelope.media or []):
+                await self._send_media(chat_id, Path(media_path))
+            # Then send text
+            text = envelope.content
+            if text:
+                for i in range(0, max(1, len(text)), _TG_MAX_LENGTH):
+                    chunk = text[i:i + _TG_MAX_LENGTH]
+                    await self._app.bot.send_message(chat_id=chat_id, text=chunk)
         except Exception as e:
             logger.error(f"Telegram send error: {e}")
+
+    async def _send_media(self, chat_id: int, path: Path) -> None:
+        if not path.exists():
+            logger.warning(f"Telegram media file not found: {path}")
+            return
+        try:
+            if path.suffix.lower() in _IMAGE_EXTENSIONS:
+                with open(path, "rb") as f:
+                    await self._app.bot.send_photo(chat_id=chat_id, photo=f)
+            else:
+                with open(path, "rb") as f:
+                    await self._app.bot.send_document(chat_id=chat_id, document=f)
+        except Exception as e:
+            logger.error(f"Telegram media send error ({path.name}): {e}")

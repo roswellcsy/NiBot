@@ -29,17 +29,25 @@ class MessageTool(Tool):
                 "channel": {"type": "string", "description": "Target channel name"},
                 "chat_id": {"type": "string", "description": "Target chat ID"},
                 "content": {"type": "string", "description": "Message content"},
+                "media": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File paths to send as media attachments",
+                },
             },
             "required": ["channel", "chat_id", "content"],
         }
 
     async def execute(self, **kwargs: Any) -> str:
+        kwargs.pop("_tool_ctx", None)
+        media = kwargs.get("media") or []
         await self._bus.publish_outbound(
             Envelope(
                 channel=kwargs["channel"],
                 chat_id=kwargs["chat_id"],
                 sender_id="assistant",
                 content=kwargs["content"],
+                media=media,
             )
         )
         return f"Sent to {kwargs['channel']}:{kwargs['chat_id']}"

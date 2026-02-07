@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Any
 
 from nibot.log import logger
@@ -24,6 +26,19 @@ class LLMProvider(ABC):
         temperature: float = 0.7,
     ) -> LLMResponse: ...
 
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[str]:
+        """Stream text chunks. Default falls back to non-streaming."""
+        resp = await self.chat(messages, tools, model, max_tokens, temperature)
+        if resp.content:
+            yield resp.content
+
 
 class LiteLLMProvider(LLMProvider):
     """LiteLLM-backed provider supporting 100+ LLM APIs."""
@@ -35,24 +50,40 @@ class LiteLLMProvider(LLMProvider):
         api_base: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        max_retries: int = 3,
+        retry_base_delay: float = 1.0,
     ) -> None:
         self.model = model
+        self.api_key = api_key
+        self.api_base = api_base
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.max_retries = max_retries
+        self.retry_base_delay = retry_base_delay
+        # Still set env vars for the default provider (backward compat with litellm auto-detect)
         if api_base:
             os.environ.setdefault("OPENAI_API_BASE", api_base)
         if api_key:
-            self._configure_api_key(api_key, model)
+            self._configure_env_key(api_key, model)
 
-    def _configure_api_key(self, api_key: str, model: str) -> None:
+    # Model prefix -> env var name for litellm auto-detection.
+    _ENV_KEY_MAP: dict[str, str] = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "claude": "ANTHROPIC_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+    }
+
+    def _configure_env_key(self, api_key: str, model: str) -> None:
+        """Set env vars for litellm auto-detection (default provider only)."""
         if api_key.startswith("sk-or-"):
             os.environ.setdefault("OPENROUTER_API_KEY", api_key)
-        elif "anthropic" in model or "claude" in model:
-            os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
-        elif "deepseek" in model:
-            os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
-        else:
-            os.environ.setdefault("OPENAI_API_KEY", api_key)
+            return
+        model_lower = model.lower()
+        for prefix, env_var in self._ENV_KEY_MAP.items():
+            if prefix in model_lower:
+                os.environ.setdefault(env_var, api_key)
+                return
+        os.environ.setdefault("OPENAI_API_KEY", api_key)
 
     async def chat(
         self,
@@ -71,14 +102,64 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens or self.max_tokens,
             "temperature": temperature if temperature >= 0 else self.temperature,
         }
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
         if tools:
             kwargs["tools"] = tools
+        max_attempts = max(1, self.max_retries)
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                resp = await acompletion(**kwargs)
+                return self._parse(resp)
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts - 1:
+                    delay = self.retry_base_delay * (2 ** attempt)
+                    logger.warning(f"LLM call failed (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {delay}s")
+                    await asyncio.sleep(delay)
+        logger.error(f"LLM call failed after {max_attempts} attempts: {last_error}")
+        return LLMResponse(content=f"LLM error: {type(last_error).__name__}", finish_reason="error")
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str = "",
+        max_tokens: int = 0,
+        temperature: float = -1.0,
+    ) -> AsyncIterator[str]:
+        """Stream text chunks. Falls back to non-streaming when tools are present."""
+        if tools:
+            resp = await self.chat(messages, tools, model, max_tokens, temperature)
+            if resp.content:
+                yield resp.content
+            return
+        from litellm import acompletion
+
+        model = model or self.model
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens or self.max_tokens,
+            "temperature": temperature if temperature >= 0 else self.temperature,
+            "stream": True,
+        }
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
         try:
             resp = await acompletion(**kwargs)
+            async for chunk in resp:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, "content") and delta.content:
+                    yield delta.content
         except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            return LLMResponse(content=f"LLM error: {e}", finish_reason="error")
-        return self._parse(resp)
+            logger.error(f"LLM stream failed: {e}")
+            yield f"LLM error: {type(e).__name__}"
 
     def _parse(self, resp: Any) -> LLMResponse:
         choice = resp.choices[0]

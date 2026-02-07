@@ -54,6 +54,16 @@ class LLMResponse:
 
 
 @dataclass
+class ToolContext:
+    """Execution context passed to tools before each invocation."""
+
+    channel: str = ""
+    chat_id: str = ""
+    session_key: str = ""
+    sender_id: str = ""
+
+
+@dataclass
 class SkillSpec:
     """Parsed skill specification from SKILL.md."""
 
@@ -64,3 +74,6 @@ class SkillSpec:
     always: bool = False
     requires_bins: list[str] = field(default_factory=list)
     requires_env: list[str] = field(default_factory=list)
+    created_at: str = ""
+    created_by: str = ""
+    version: int = 1
