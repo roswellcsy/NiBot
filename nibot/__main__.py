@@ -27,6 +27,10 @@ def _auto_add_channels(app):
         from nibot.channels.feishu import FeishuChannel
 
         app.add_channel(FeishuChannel(cfg.feishu, app.bus))
+    if cfg.discord.enabled and cfg.discord.token:
+        from nibot.channels.discord import DiscordChannel
+
+        app.add_channel(DiscordChannel(cfg.discord, app.bus))
 
 
 if __name__ == "__main__":

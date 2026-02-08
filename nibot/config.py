@@ -121,9 +121,16 @@ class FeishuChannelConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)
 
 
+class DiscordChannelConfig(BaseModel):
+    enabled: bool = False
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class ChannelsConfig(BaseModel):
     telegram: TelegramChannelConfig = Field(default_factory=TelegramChannelConfig)
     feishu: FeishuChannelConfig = Field(default_factory=FeishuChannelConfig)
+    discord: DiscordChannelConfig = Field(default_factory=DiscordChannelConfig)
     wecom: "WeComChannelConfig" = Field(default_factory=lambda: WeComChannelConfig())
     api: "APIChannelConfig" = Field(default_factory=lambda: APIChannelConfig())
 
@@ -329,6 +336,8 @@ def validate_startup(config: NiBotConfig) -> None:
     if config.channels.feishu.enabled:
         if not config.channels.feishu.app_id or not config.channels.feishu.app_secret:
             errors.append("channels.feishu.enabled=true but app_id/app_secret missing")
+    if config.channels.discord.enabled and not config.channels.discord.token:
+        errors.append("channels.discord.enabled=true but token is empty")
     if config.channels.wecom.enabled:
         if not config.channels.wecom.corp_id or not config.channels.wecom.secret:
             errors.append("channels.wecom.enabled=true but corp_id/secret missing")
