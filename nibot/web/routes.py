@@ -77,7 +77,9 @@ async def _skills_delete(app: Any, name: str) -> dict[str, Any]:
         return {"error": "name required"}
     import shutil
     for d in app.skills.skills_dirs:
-        candidate = d / name
+        candidate = (d / name).resolve()
+        if not candidate.is_relative_to(d.resolve()):
+            return {"error": "invalid skill name"}
         if candidate.is_dir():
             shutil.rmtree(candidate)
             app.skills.reload()

@@ -47,6 +47,7 @@ class PipelineExecution:
     finished_at: datetime | None = None
     origin_channel: str = ""
     origin_chat_id: str = ""
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class PipelineEngine:
@@ -76,6 +77,13 @@ class PipelineEngine:
         for step in steps:
             execution.steps[step.id] = StepExecution(step=step)
 
+        # Validate dependency references
+        step_ids = set(execution.steps.keys())
+        for se in execution.steps.values():
+            for dep in se.step.depends_on:
+                if dep not in step_ids:
+                    raise ValueError(f"Step '{se.step.id}' depends on unknown step '{dep}'")
+
         self._pipelines[pipeline_id] = execution
 
         # Start scheduling
@@ -91,27 +99,25 @@ class PipelineEngine:
 
         try:
             while execution.status == "running":
-                ready = self._find_ready_steps(execution)
+                async with execution.lock:
+                    ready = self._find_ready_steps(execution)
 
-                if not ready and not self._has_running_steps(execution):
-                    # Nothing ready and nothing running -- pipeline is done
-                    all_completed = all(
-                        se.status in ("completed", "skipped")
-                        for se in execution.steps.values()
-                    )
-                    execution.status = "completed" if all_completed else "failed"
-                    execution.finished_at = datetime.now()
-                    break
+                    if not ready and not self._has_running_steps(execution):
+                        all_completed = all(
+                            se.status in ("completed", "skipped")
+                            for se in execution.steps.values()
+                        )
+                        execution.status = "completed" if all_completed else "failed"
+                        execution.finished_at = datetime.now()
+                        break
 
-                # Dispatch ready steps in parallel
-                tasks = []
-                for step_exec in ready:
-                    tasks.append(self._dispatch_step(execution, step_exec))
+                    tasks = []
+                    for step_exec in ready:
+                        tasks.append(self._dispatch_step(execution, step_exec))
 
                 if tasks:
                     await asyncio.gather(*tasks)
                 else:
-                    # Wait a bit for running steps to complete
                     await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Pipeline {pipeline_id} scheduler error: {e}")
@@ -158,8 +164,6 @@ class PipelineEngine:
             step_exec.result = result
             step_exec.finished_at = datetime.now()
             step_exec.status = "completed"
-            # Re-trigger scheduling
-            asyncio.create_task(self._schedule(execution.pipeline_id))
 
         try:
             task_id = await self._subagents.spawn(
@@ -334,11 +338,14 @@ class PipelineTool(Tool):
                     task=s.get("task", ""),
                     depends_on=s.get("depends_on", []),
                 ))
-            pid = await self._engine.create(
-                steps,
-                origin_channel=ctx.channel if ctx else "",
-                origin_chat_id=ctx.chat_id if ctx else "",
-            )
+            try:
+                pid = await self._engine.create(
+                    steps,
+                    origin_channel=ctx.channel if ctx else "",
+                    origin_chat_id=ctx.chat_id if ctx else "",
+                )
+            except ValueError as e:
+                return f"Error: {e}"
             return f"Pipeline created: {pid} ({len(steps)} steps)"
 
         return f"Unknown action: {action}"

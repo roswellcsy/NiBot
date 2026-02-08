@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from nibot.app import NiBot
 
 
+_MAX_BODY = 1_048_576  # 1 MB
+
+
 class WebPanel:
     """Lightweight management web panel.
 
@@ -60,6 +63,9 @@ class WebPanel:
                         content_length = int(v.strip())
 
             body = b""
+            if content_length > _MAX_BODY:
+                await self._respond(writer, {"error": "payload too large"}, status=413)
+                return
             if content_length > 0:
                 body = await asyncio.wait_for(reader.readexactly(content_length), timeout=10.0)
 

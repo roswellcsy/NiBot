@@ -278,7 +278,9 @@ class SessionManager:
         return None
 
     def _path_for(self, key: str) -> Path:
-        safe = key.replace(":", "_").replace("/", "_").replace("\\", "_")
+        safe = key
+        for ch in r':/<>\|"?*':
+            safe = safe.replace(ch, "_")
         return self.sessions_dir / f"{safe}.jsonl"
 
 

@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from nibot.channels.wecom import WeComChannel
 
 
+_MAX_BODY = 1_048_576  # 1 MB
+
+
 class WebhookServer:
     """Lightweight HTTP server for webhook callbacks and API requests.
 
@@ -71,6 +74,9 @@ class WebhookServer:
 
             # Read body
             body = b""
+            if content_length > _MAX_BODY:
+                await self._send_response(writer, {"error": "payload too large"}, status=413)
+                return
             if content_length > 0:
                 body = await asyncio.wait_for(
                     reader.readexactly(content_length), timeout=10.0
