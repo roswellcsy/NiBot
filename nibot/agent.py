@@ -78,8 +78,10 @@ class AgentLoop:
     async def _handle(self, envelope: Envelope) -> None:
         try:
             response = await self._process(envelope)
-            # Skip publishing if streaming already delivered the content
-            if not (response.metadata or {}).get("streamed"):
+            # Skip publishing if streaming already delivered the content,
+            # BUT always publish if there's a response_key (API channel waiter).
+            meta = response.metadata or {}
+            if not meta.get("streamed") or meta.get("response_key"):
                 await self.bus.publish_outbound(response)
         except Exception as e:
             logger.error(f"Agent error [{envelope.channel}:{envelope.chat_id}]: {e}")
