@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+# Bypass local proxy for LAN targets
+export no_proxy="192.168.5.55,127.0.0.1,localhost"
+export NO_PROXY="$no_proxy"
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY 2>/dev/null || true
+
 API="${1:-http://192.168.5.55:8080/api/chat}"
 PASS=0
 FAIL=0
@@ -50,7 +55,7 @@ run_test() {
 
     local result="FAIL"
     case "$check_mode" in
-        contains)
+        raw_post|contains)
             if echo "$body" | grep -qi "$check"; then
                 result="PASS"
             fi
@@ -88,10 +93,10 @@ run_test() {
 
     if [ "$result" = "PASS" ]; then
         printf "${GREEN}PASS${NC}\n"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         printf "${RED}FAIL${NC}  (http=$http_code body=${body:0:120})\n"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
     RESULTS+=("{\"id\":\"$id\",\"name\":\"$name\",\"result\":\"$result\",\"http\":\"$http_code\",\"body\":$(echo "${body:0:200}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""')}")
 }
@@ -120,10 +125,10 @@ run_multi_turn() {
     # Check LAST response
     if echo "$body" | grep -qi "$check"; then
         printf "${GREEN}PASS${NC}\n"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         printf "${RED}FAIL${NC}  (last_body=${body:0:120})\n"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
 }
 
@@ -143,11 +148,11 @@ echo ""
 printf "  Health   %-30s " "API reachable"
 HEALTH=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API" \
     -H "Content-Type: application/json" \
-    -d '{"content":"ping","sender_id":"e2e","chat_id":"health","timeout":30}' \
+    -d "{\"content\":\"ping\",\"sender_id\":\"e2e\",\"chat_id\":\"health_$(date +%s)\",\"timeout\":30}" \
     --max-time 35 2>/dev/null) || HEALTH="000"
 if [ "$HEALTH" = "200" ]; then
     printf "${GREEN}PASS${NC}\n"
-    ((PASS++))
+    PASS=$((PASS + 1))
 else
     printf "${RED}FAIL${NC} (http=$HEALTH)\n"
     echo "API not reachable. Aborting."
@@ -169,7 +174,19 @@ section "K: Error Handling (quick)"
 run_test "K-01" "Empty content"         '{"content":"","sender_id":"e2e","chat_id":"k01","timeout":10}' "e2e_k01" 10 "error\|empty" "raw_post"
 run_test "K-02" "Invalid JSON"          'not json at all'                                  "e2e_k02" 10 "error\|invalid" "raw_post"
 run_test "K-04" "Unicode/emoji"         "Tell me about the rocket emoji in Chinese"        "e2e_k04" 30 "" "has_content"
-run_test "K-08" "Oversized payload"     "{\"content\":\"$(python3 -c 'print("x"*1100000)')\",\"sender_id\":\"e2e\",\"chat_id\":\"k08\",\"timeout\":5}" "e2e_k08" 10 "too large\|413\|error" "raw_post"
+# K-08: Oversized payload (>1MB) -- use temp file since arg too large for CLI
+printf "  %-8s %-30s " "K-08" "Oversized payload"
+K08_TMP=$(mktemp)
+python3 -c "import json; print(json.dumps({'content':'x'*1100000,'sender_id':'e2e','chat_id':'k08','timeout':5}))" > "$K08_TMP"
+K08_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API" -H "Content-Type: application/json" -d @"$K08_TMP" --max-time 10 2>/dev/null) || K08_CODE="000"
+rm -f "$K08_TMP"
+if [ "$K08_CODE" = "413" ] || [ "$K08_CODE" = "400" ]; then
+    printf "${GREEN}PASS${NC}\n"
+    PASS=$((PASS + 1))
+else
+    printf "${RED}FAIL${NC}  (http=$K08_CODE)\n"
+    FAIL=$((FAIL + 1))
+fi
 
 # ======== B: File Operations ========
 section "B: File Operations"
@@ -245,10 +262,10 @@ J03_BODY=$(curl -s -X POST "$API" -H "Content-Type: application/json" \
     --max-time 35 2>/dev/null)
 if echo "$J03_BODY" | grep -q '"42"'; then
     printf "${RED}FAIL${NC}  (leaked: $J03_BODY)\n"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 else
     printf "${GREEN}PASS${NC}\n"
-    ((PASS++))
+    PASS=$((PASS + 1))
 fi
 
 # ======== L: Cross-tool Complex Scenarios ========
@@ -274,16 +291,16 @@ K07_PASS=0
 for i in "${!PIDS[@]}"; do
     wait "${PIDS[$i]}" 2>/dev/null || true
     if [ -s "${TMPFILES[$i]}" ]; then
-        ((K07_PASS++))
+        K07_PASS=$((K07_PASS + 1))
     fi
     rm -f "${TMPFILES[$i]}"
 done
 if [ "$K07_PASS" -ge 4 ]; then
     printf "${GREEN}PASS${NC} ($K07_PASS/5 succeeded)\n"
-    ((PASS++))
+    PASS=$((PASS + 1))
 else
     printf "${RED}FAIL${NC} ($K07_PASS/5 succeeded)\n"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 fi
 
 # ======== Summary ========
