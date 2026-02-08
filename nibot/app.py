@@ -67,7 +67,15 @@ class NiBot:
             workspace=workspace,
         )
         self.evolution_log = EvolutionLog(workspace)
-        self.provider_pool = ProviderPool(self.config.providers, self.provider)
+        # Build quota configs from provider settings
+        quota_configs: dict[str, Any] = {}
+        for pname in ("anthropic", "openai", "openrouter", "deepseek"):
+            pc = self.config.providers.get(pname)
+            if pc:
+                quota_configs[pname] = pc.quota
+        for pname, pc in self.config.providers.extras.items():
+            quota_configs[pname] = pc.quota
+        self.provider_pool = ProviderPool(self.config.providers, self.provider, quota_configs=quota_configs)
         self.worktree_mgr = WorktreeManager(workspace)
         self.evo_trigger = EvolutionTrigger(
             bus=self.bus,
@@ -91,6 +99,7 @@ class NiBot:
             config=self.config,
             evo_trigger=self.evo_trigger,
             rate_limiter=self._rate_limiter,
+            provider_pool=self.provider_pool,
         )
         self.subagents = SubagentManager(
             self.provider, self.registry, self.bus,

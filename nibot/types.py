@@ -47,6 +47,7 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
+    ratelimit_info: dict[str, int] = field(default_factory=dict)
 
     @property
     def has_tool_calls(self) -> bool:

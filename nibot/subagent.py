@@ -195,8 +195,11 @@ class SubagentManager:
         model_override = agent_config.model if agent_config and agent_config.model else ""
         max_iter = agent_config.max_iterations if agent_config else max_iterations
 
-        # Provider selection: agent_config.provider -> pool -> default
-        if agent_config and agent_config.provider and self.provider_pool:
+        # Provider selection: fallback_chain -> named provider -> default
+        use_fallback = False
+        if agent_config and agent_config.fallback_chain and self.provider_pool:
+            use_fallback = True
+        elif agent_config and agent_config.provider and self.provider_pool:
             provider = self.provider_pool.get(agent_config.provider)
         else:
             provider = self.provider
@@ -208,9 +211,15 @@ class SubagentManager:
         final = ""
         try:
             for _ in range(max_iter):
-                resp = await provider.chat(
-                    messages=messages, tools=tool_defs or None, model=model_override,
-                )
+                if use_fallback:
+                    resp = await self.provider_pool.chat_with_fallback(
+                        messages=messages, tools=tool_defs or None,
+                        chain=agent_config.fallback_chain, model=model_override,
+                    )
+                else:
+                    resp = await provider.chat(
+                        messages=messages, tools=tool_defs or None, model=model_override,
+                    )
                 if not resp.has_tool_calls:
                     final = resp.content or ""
                     break

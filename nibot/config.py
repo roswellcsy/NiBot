@@ -19,6 +19,7 @@ class AgentTypeConfig(BaseModel):
     system_prompt: str = ""
     provider: str = ""
     workspace_mode: str = ""
+    fallback_chain: list[str] = Field(default_factory=list)
 
 
 class ScheduledJob(BaseModel):
@@ -135,10 +136,17 @@ class ChannelsConfig(BaseModel):
     api: "APIChannelConfig" = Field(default_factory=lambda: APIChannelConfig())
 
 
+class ProviderQuotaConfig(BaseModel):
+    """Per-provider quota limits (0 = unlimited)."""
+    rpm: int = 0
+    tpm: int = 0
+
+
 class ProviderConfig(BaseModel):
     api_key: str = ""
     api_base: str = ""
     model: str = ""
+    quota: ProviderQuotaConfig = Field(default_factory=ProviderQuotaConfig)
 
 
 class ProvidersConfig(BaseModel):

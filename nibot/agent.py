@@ -38,6 +38,7 @@ class AgentLoop:
         config: NiBotConfig,
         evo_trigger: Any | None = None,
         rate_limiter: Any | None = None,
+        provider_pool: Any | None = None,
     ) -> None:
         self.bus = bus
         self.provider = provider
@@ -47,6 +48,8 @@ class AgentLoop:
         self.max_iterations = config.agent.max_iterations
         self._gateway_tools: list[str] = config.agent.gateway_tools
         self._streaming = config.agent.streaming
+        self._fallback_chain: list[str] = config.agent.provider_fallback_chain
+        self._provider_pool = provider_pool
         self._evo_trigger = evo_trigger
         self._rate_limiter = rate_limiter
         self._running = False
@@ -181,9 +184,15 @@ class AgentLoop:
                         final_content = response.content or "".join(chunks) or ""
                         break
                 else:
-                    response = await self.provider.chat(
-                        messages=messages, tools=tool_defs or None
-                    )
+                    if self._fallback_chain and self._provider_pool:
+                        response = await self._provider_pool.chat_with_fallback(
+                            messages=messages, tools=tool_defs or None,
+                            chain=self._fallback_chain,
+                        )
+                    else:
+                        response = await self.provider.chat(
+                            messages=messages, tools=tool_defs or None
+                        )
                     if not response.has_tool_calls:
                         final_content = response.content or ""
                         break

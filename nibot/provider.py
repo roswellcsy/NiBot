@@ -191,9 +191,25 @@ class LiteLLMProvider(LLMProvider):
                     except json.JSONDecodeError:
                         args = {"raw": args}
                 tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
+        # Extract rate limit headers from LiteLLM response (if available)
+        ratelimit_info: dict[str, int] = {}
+        hidden = getattr(resp, "_hidden_params", None) or {}
+        headers = hidden.get("additional_headers", None) or {}
+        _RL_KEYS = (
+            "x-ratelimit-remaining-requests", "x-ratelimit-remaining-tokens",
+            "anthropic-ratelimit-requests-remaining", "anthropic-ratelimit-tokens-remaining",
+        )
+        for key in _RL_KEYS:
+            val = headers.get(key)
+            if val is not None:
+                try:
+                    ratelimit_info[key] = int(val)
+                except (ValueError, TypeError):
+                    pass
         return LLMResponse(
             content=getattr(msg, "content", None),
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             usage=dict(resp.usage) if resp.usage else {},
+            ratelimit_info=ratelimit_info,
         )
