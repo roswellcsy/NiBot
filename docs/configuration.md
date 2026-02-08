@@ -174,13 +174,13 @@ Override default sub-agent configurations:
 {
   "agents": {
     "coder": {
-      "tools": ["read_file", "write_file", "edit_file", "exec", "git"],
+      "tools": ["file_read", "write_file", "edit_file", "exec", "git"],
       "maxIterations": 25,
       "workspaceMode": "worktree",
       "provider": "openai"
     },
     "researcher": {
-      "tools": ["web_search", "web_fetch", "read_file"],
+      "tools": ["web_search", "web_fetch", "file_read"],
       "maxIterations": 15
     }
   }

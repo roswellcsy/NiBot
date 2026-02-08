@@ -78,13 +78,13 @@ def generate_config(
             "coder": {
                 "model": f"ollama/{local_model}",
                 "provider": "ollama",
-                "tools": ["read_file", "write_file", "edit_file", "list_dir", "exec", "git",
+                "tools": ["file_read", "write_file", "edit_file", "list_dir", "exec", "git",
                           "code_review", "test_runner"],
                 "max_iterations": 25,
                 "workspace_mode": "worktree",
             },
             "researcher": {
-                "tools": ["web_search", "web_fetch", "read_file", "write_file"],
+                "tools": ["web_search", "web_fetch", "file_read", "write_file"],
                 "max_iterations": 15,
             },
         },

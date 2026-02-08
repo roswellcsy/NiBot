@@ -197,7 +197,7 @@ class TestConfigDefaults:
 
     def test_coder_still_has_original_tools(self) -> None:
         tools = DEFAULT_AGENT_TYPES["coder"].tools
-        for t in ["read_file", "write_file", "edit_file", "list_dir", "exec", "git"]:
+        for t in ["file_read", "write_file", "edit_file", "list_dir", "exec", "git"]:
             assert t in tools
 
 

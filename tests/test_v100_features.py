@@ -195,13 +195,13 @@ class TestSessionExport:
     def test_with_tool_calls(self) -> None:
         session = _make_session("tools", [
             {"role": "assistant", "content": "", "tool_calls": [
-                {"function": {"name": "read_file", "arguments": '{"path": "/tmp/x"}'}}
+                {"function": {"name": "file_read", "arguments": '{"path": "/tmp/x"}'}}
             ]},
-            {"role": "tool", "name": "read_file", "content": "file contents here"},
+            {"role": "tool", "name": "file_read", "content": "file contents here"},
         ])
         result = format_session_export(session, fmt="markdown")
-        assert "`read_file`" in result
-        assert "Tool result (read_file)" in result
+        assert "`file_read`" in result
+        assert "Tool result (file_read)" in result
 
     def test_default_format_is_markdown(self) -> None:
         session = _make_session("default", [{"role": "user", "content": "hi"}])

@@ -285,7 +285,7 @@ class TestCleanup:
         from nibot.app import NiBot
         app = NiBot()
         # Tools should already be registered before run() is called
-        assert app.registry.has("read_file")
+        assert app.registry.has("file_read")
         assert app.registry.has("delegate")
 
 

@@ -48,7 +48,7 @@ MODEL_PROVIDER_PREFIXES: dict[str, str] = {
 
 DEFAULT_AGENT_TYPES: dict[str, AgentTypeConfig] = {
     "coder": AgentTypeConfig(
-        tools=["read_file", "write_file", "edit_file", "list_dir", "exec", "git",
+        tools=["file_read", "write_file", "edit_file", "list_dir", "exec", "git",
                "code_review", "test_runner"],
         max_iterations=25,
         workspace_mode="worktree",
@@ -58,15 +58,15 @@ DEFAULT_AGENT_TYPES: dict[str, AgentTypeConfig] = {
         ),
     ),
     "researcher": AgentTypeConfig(
-        tools=["web_search", "web_fetch", "read_file", "write_file"],
+        tools=["web_search", "web_fetch", "file_read", "write_file"],
         max_iterations=15,
     ),
     "system": AgentTypeConfig(
-        tools=["exec", "read_file", "list_dir"],
+        tools=["exec", "file_read", "list_dir"],
         max_iterations=10,
     ),
     "evolution": AgentTypeConfig(
-        tools=["read_file", "write_file", "edit_file", "list_dir", "exec", "skill", "analyze"],
+        tools=["file_read", "write_file", "edit_file", "list_dir", "exec", "skill", "analyze"],
         max_iterations=30,
         system_prompt=(
             "You are NiBot's evolution engine. Your system state is injected above.\n\n"

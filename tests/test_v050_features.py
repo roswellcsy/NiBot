@@ -273,15 +273,15 @@ class TestIsolatedRegistry:
     def test_file_tools_point_to_worktree(self, tmp_path: Path) -> None:
         reg = ToolRegistry()
         reg.register(FakeTool("web_search"))
-        reg.register(FakeTool("read_file"))
+        reg.register(FakeTool("file_read"))
         bus = MessageBus()
         mgr = SubagentManager(FakeProvider(), reg, bus)
 
-        config = AgentTypeConfig(tools=["read_file", "write_file", "exec", "web_search"])
+        config = AgentTypeConfig(tools=["file_read", "write_file", "exec", "web_search"])
         iso_reg = mgr._create_isolated_registry(tmp_path, config)
 
         # File tools should be real tool instances, not FakeTool
-        assert iso_reg.has("read_file")
+        assert iso_reg.has("file_read")
         assert iso_reg.has("write_file")
         assert iso_reg.has("exec")
         # web_search inherited from main registry
@@ -293,10 +293,10 @@ class TestIsolatedRegistry:
         bus = MessageBus()
         mgr = SubagentManager(FakeProvider(), reg, bus)
 
-        config = AgentTypeConfig(tools=["read_file", "git"])
+        config = AgentTypeConfig(tools=["file_read", "git"])
         iso_reg = mgr._create_isolated_registry(tmp_path, config)
         assert iso_reg.has("git")
-        assert iso_reg.has("read_file")
+        assert iso_reg.has("file_read")
 
 
 # ---- Thoughts Context ----

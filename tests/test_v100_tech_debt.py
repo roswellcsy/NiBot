@@ -57,7 +57,7 @@ class TestGitToolIsolation:
         wt_mgr = MagicMock(spec=WorktreeManager)
         mgr = SubagentManager(FakeProvider(), ToolRegistry(), bus, worktree_mgr=wt_mgr)
 
-        config = AgentTypeConfig(tools=["git", "read_file", "exec"])
+        config = AgentTypeConfig(tools=["git", "file_read", "exec"])
         fake_path = Path(tempfile.mkdtemp())
         reg = mgr._create_isolated_registry(fake_path, config)
 

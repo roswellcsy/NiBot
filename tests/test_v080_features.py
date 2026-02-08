@@ -56,9 +56,9 @@ class TestComputeSessionMetrics:
     def test_tool_calls_and_errors(self) -> None:
         msgs = [
             _msg("user", "Do something"),
-            _msg("tool", "result ok", name="read_file"),
+            _msg("tool", "result ok", name="file_read"),
             _msg("tool", "Error: file not found", name="write_file"),
-            _msg("tool", "another result", name="read_file"),
+            _msg("tool", "another result", name="file_read"),
             _msg("assistant", "Done"),
         ]
         m = compute_session_metrics(msgs)
@@ -71,11 +71,11 @@ class TestComputeSessionMetrics:
     def test_unique_tools(self) -> None:
         msgs = [
             _msg("tool", "ok", name="exec"),
-            _msg("tool", "ok", name="read_file"),
+            _msg("tool", "ok", name="file_read"),
             _msg("tool", "ok", name="exec"),
         ]
         m = compute_session_metrics(msgs)
-        assert m.unique_tools == ["exec", "read_file"]
+        assert m.unique_tools == ["exec", "file_read"]
         assert m.tool_diversity == 2
 
     def test_timestamps_and_duration(self) -> None:
@@ -116,7 +116,7 @@ class TestAggregateMetrics:
     def test_multiple_sessions(self) -> None:
         s1 = SessionMetrics(
             message_count=10, tool_calls=5, tool_errors=1,
-            unique_tools=["exec", "read_file"],
+            unique_tools=["exec", "file_read"],
             conversation_turns=3, duration_seconds=60.0,
         )
         s2 = SessionMetrics(
@@ -134,7 +134,7 @@ class TestAggregateMetrics:
         assert abs(agg.avg_duration_seconds - 45.0) < 0.01
 
     def test_tool_usage_ranking(self) -> None:
-        s1 = SessionMetrics(unique_tools=["exec", "read_file"])
+        s1 = SessionMetrics(unique_tools=["exec", "file_read"])
         s2 = SessionMetrics(unique_tools=["exec"])
         s3 = SessionMetrics(unique_tools=["exec", "write_file"])
         agg = aggregate_metrics([s1, s2, s3])

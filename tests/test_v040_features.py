@@ -66,7 +66,7 @@ class TestAgentTypeConfig:
 
     def test_coder_fields_correct(self) -> None:
         coder = DEFAULT_AGENT_TYPES["coder"]
-        assert "read_file" in coder.tools
+        assert "file_read" in coder.tools
         assert "exec" in coder.tools
         assert "git" in coder.tools
         assert coder.max_iterations == 25
@@ -146,7 +146,7 @@ class TestTypedSubagent:
     @pytest.mark.asyncio
     async def test_whitelist_mode_with_agent_config(self) -> None:
         reg = ToolRegistry()
-        reg.register(FakeTool("read_file"))
+        reg.register(FakeTool("file_read"))
         reg.register(FakeTool("exec"))
         reg.register(FakeTool("delegate"))
 
@@ -154,7 +154,7 @@ class TestTypedSubagent:
         bus = MessageBus()
         mgr = SubagentManager(provider, reg, bus)
 
-        config = AgentTypeConfig(tools=["read_file"], max_iterations=1)
+        config = AgentTypeConfig(tools=["file_read"], max_iterations=1)
         await mgr.spawn(
             task="test", label="t", origin_channel="ch", origin_chat_id="1",
             agent_type="coder", agent_config=config,
@@ -174,7 +174,7 @@ class TestTypedSubagent:
                 return LLMResponse(content="done", finish_reason="stop")
 
         reg = ToolRegistry()
-        reg.register(FakeTool("read_file"))
+        reg.register(FakeTool("file_read"))
         reg.register(FakeTool("exec"))
         bus = MessageBus()
         mgr = SubagentManager(TrackingProvider(), reg, bus)
@@ -192,7 +192,7 @@ class TestTypedSubagent:
     async def test_no_config_falls_back_to_deny_list(self) -> None:
         """Without agent_config, subagent uses SUBAGENT_TOOL_DENY blacklist."""
         reg = ToolRegistry()
-        reg.register(FakeTool("read_file"))
+        reg.register(FakeTool("file_read"))
         reg.register(FakeTool("delegate"))
 
         provider = MinimalProvider()
