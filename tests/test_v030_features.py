@@ -232,8 +232,11 @@ class TestSSRFProtection:
         assert _is_private_url("not-a-url") is True
 
     def test_public_url_allowed(self) -> None:
-        # Use a well-known public DNS that resolves to non-private IP
-        assert _is_private_url("https://www.google.com") is False
+        # Mock DNS to return a known public IP, avoiding network dependency
+        from unittest.mock import patch
+        fake_result = [(2, 1, 6, "", ("142.250.80.46", 443))]
+        with patch("socket.getaddrinfo", return_value=fake_result):
+            assert _is_private_url("https://www.google.com") is False
 
 
 class TestErrorSanitization:

@@ -4,7 +4,8 @@ A self-evolving, multi-channel AI agent framework. The core stays lean; capabili
 
 ## Features
 
-- **4 channels**: Telegram, Feishu (Lark), WeCom (WeChat Work), HTTP API
+- **5 channels**: Telegram, Feishu (Lark), WeCom (WeChat Work), Discord, HTTP API
+- **Streaming responses**: Real-time token-by-token output with edit-in-place UX (Telegram, Discord)
 - **23 built-in tools**: file I/O, code review, test runner, image generation, web search, git, scaffolding, and more
 - **Sub-agent system**: Spawn specialized agents (coder, researcher, system, evolution) with isolated workspaces
 - **Pipeline orchestration**: DAG-based multi-agent workflows with parallel execution
@@ -38,7 +39,7 @@ See [docs/quickstart.md](docs/quickstart.md) for detailed setup instructions.
 ## Architecture
 
 ```
-                    Channels (Telegram / Feishu / WeCom / API)
+                    Channels (Telegram / Feishu / WeCom / Discord / API)
                                     |
                               MessageBus (async queues)
                                     |
@@ -118,10 +119,10 @@ nibot/
   health.py       # Health check HTTP server
   metrics.py      # Session metrics + usage stats
   rate_limiter.py # Sliding window rate limiter
-  channels/       # Telegram, Feishu, WeCom, API
+  channels/       # Telegram, Feishu, WeCom, Discord, API
   tools/          # 23 built-in tools
   web/            # Management web panel
-tests/            # 419 tests
+tests/            # 450 tests
 ```
 
 ## License
