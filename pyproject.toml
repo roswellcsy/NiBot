@@ -23,13 +23,22 @@ feishu = ["lark-oapi>=1.0"]
 discord = ["discord.py>=2.0"]
 web = ["readability-lxml>=0.8", "lxml>=5.0"]
 all = ["nibot[telegram,feishu,discord,web]"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "pytest-cov>=4.0"]
 
 [project.scripts]
 nibot = "nibot.__main__:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["nibot"]
+omit = ["nibot/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
 
 [tool.ruff]
 target-version = "py311"

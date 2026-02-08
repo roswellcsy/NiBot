@@ -139,6 +139,23 @@ Endpoints:
 - `POST /webhook/wecom` -- WeCom callback
 - `POST /api/chat` -- Synchronous API (JSON body: `{"content": "...", "sender_id": "..."}`)
 
+## Updating a Running Deployment
+
+Use the one-click update script to pull latest code, rebuild, and restart:
+
+```bash
+bash scripts/update.sh
+```
+
+This script:
+1. Pulls latest code from `origin/master`
+2. Rebuilds the Docker image
+3. Restarts the container with `--force-recreate`
+4. Waits up to 60 seconds for the health check to pass
+5. Reports success or failure with recent logs
+
+Works in any environment: WSL2 Ubuntu, Mac, or Linux server.
+
 ## Logging
 
 ### JSON format (recommended for production)

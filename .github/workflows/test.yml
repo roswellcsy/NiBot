@@ -26,5 +26,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[all,dev]"
 
-      - name: Run tests
-        run: pytest tests/ -v --tb=short
+      - name: Run tests with coverage
+        run: pytest tests/ -v --tb=short --cov=nibot --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+        if: matrix.python-version == '3.13'
