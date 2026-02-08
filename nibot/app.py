@@ -12,6 +12,7 @@ from nibot.bus import MessageBus
 from nibot.channel import BaseChannel
 from nibot.config import DEFAULT_AGENT_TYPES, NiBotConfig, _default_config_path, default_evolution_schedule, load_config, validate_startup
 from nibot.context import ContextBuilder
+from nibot.event_log import EventLog
 from nibot.evolution_log import EvolutionLog
 from nibot.evolution_trigger import EvolutionTrigger
 from nibot.log import logger
@@ -44,7 +45,6 @@ class NiBot:
 
         self._config_path = Path(config_path).expanduser() if config_path else _default_config_path()
         self.bus = MessageBus(maxsize=self.config.agent.bus_queue_maxsize)
-        self.registry = ToolRegistry()
 
         workspace = Path(self.config.agent.workspace).expanduser()
         workspace.mkdir(parents=True, exist_ok=True)
@@ -53,6 +53,12 @@ class NiBot:
             raise RuntimeError(f"Workspace directory not writable: {workspace}")
         self.workspace = workspace
 
+        # Structured event log (created early -- injected into registry, pool, agent)
+        el_cfg = self.config.event_log
+        el_path = Path(el_cfg.file).expanduser() if el_cfg.file else workspace / "events.jsonl"
+        self.event_log = EventLog(el_path, enabled=el_cfg.enabled)
+
+        self.registry = ToolRegistry(event_log=self.event_log)
         self.sessions = SessionManager(workspace / "sessions")
         self.memory = MemoryStore(workspace / "memory")
         self.skills = SkillsLoader([
@@ -75,7 +81,7 @@ class NiBot:
                 quota_configs[pname] = pc.quota
         for pname, pc in self.config.providers.extras.items():
             quota_configs[pname] = pc.quota
-        self.provider_pool = ProviderPool(self.config.providers, self.provider, quota_configs=quota_configs)
+        self.provider_pool = ProviderPool(self.config.providers, self.provider, quota_configs=quota_configs, event_log=self.event_log)
         self.worktree_mgr = WorktreeManager(workspace)
         self.evo_trigger = EvolutionTrigger(
             bus=self.bus,
@@ -100,6 +106,7 @@ class NiBot:
             evo_trigger=self.evo_trigger,
             rate_limiter=self._rate_limiter,
             provider_pool=self.provider_pool,
+            event_log=self.event_log,
         )
         self.subagents = SubagentManager(
             self.provider, self.registry, self.bus,

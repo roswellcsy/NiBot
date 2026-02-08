@@ -81,7 +81,7 @@ async def _handle_connection(
 def _build_health(app: NiBot) -> dict[str, Any]:
     """Build health response payload. Pure data collection, no I/O."""
     uptime = time.monotonic() - _START_TIME
-    return {
+    result: dict[str, Any] = {
         "status": "ok" if app.agent._running else "degraded",
         "uptime_seconds": round(uptime, 1),
         "model": app.config.agent.model,
@@ -90,6 +90,25 @@ def _build_health(app: NiBot) -> dict[str, Any]:
         "active_tasks": len(app.agent._tasks),
         "scheduler_jobs": len(app.scheduler._jobs),
     }
+    # Provider quota status (best-effort, never fail health endpoint)
+    try:
+        from nibot.provider_pool import ProviderPool, ProviderQuota
+        pool = getattr(app, "provider_pool", None)
+        if isinstance(pool, ProviderPool):
+            providers: dict[str, Any] = {}
+            for name in ("anthropic", "openai", "openrouter", "deepseek"):
+                quota = pool.get_quota(name)
+                if isinstance(quota, ProviderQuota):
+                    providers[name] = {
+                        "available": quota.is_available(),
+                        "rpm_used": len(quota._minute_requests),
+                        "rpm_limit": quota.rpm_limit,
+                    }
+            if providers:
+                result["providers"] = providers
+    except Exception as e:
+        logger.debug(f"Failed to collect provider stats for /health: {e}")
+    return result
 
 
 async def start_health_server(app: NiBot) -> asyncio.Server | None:

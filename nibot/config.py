@@ -236,6 +236,14 @@ class HealthConfig(BaseModel):
     port: int = 9100
 
 
+class EventLogConfig(BaseModel):
+    """Structured event log settings."""
+    enabled: bool = True
+    file: str = ""            # empty = workspace/events.jsonl
+    rotation: str = "50 MB"
+    retention: str = "90 days"
+
+
 class NiBotConfig(BaseSettings):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
@@ -247,6 +255,7 @@ class NiBotConfig(BaseSettings):
     webhook: WebhookServerConfig = Field(default_factory=WebhookServerConfig)
     web_panel: WebPanelConfig = Field(default_factory=WebPanelConfig)
     marketplace: MarketplaceConfig = Field(default_factory=MarketplaceConfig)
+    event_log: EventLogConfig = Field(default_factory=EventLogConfig)
     agents: dict[str, AgentTypeConfig] = Field(default_factory=dict)
     schedules: list[ScheduledJob] = Field(default_factory=list)
 

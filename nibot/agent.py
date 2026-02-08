@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any
 
 from nibot.bus import MessageBus
@@ -39,6 +40,7 @@ class AgentLoop:
         evo_trigger: Any | None = None,
         rate_limiter: Any | None = None,
         provider_pool: Any | None = None,
+        event_log: Any | None = None,
     ) -> None:
         self.bus = bus
         self.provider = provider
@@ -52,6 +54,7 @@ class AgentLoop:
         self._provider_pool = provider_pool
         self._evo_trigger = evo_trigger
         self._rate_limiter = rate_limiter
+        self._event_log = event_log
         self._running = False
         self._semaphore = asyncio.Semaphore(10)
         self._tasks: set[asyncio.Task[None]] = set()
@@ -104,6 +107,7 @@ class AgentLoop:
                     metadata=envelope.metadata,
                 )
 
+        t0 = time.monotonic()
         session_key = f"{envelope.channel}:{envelope.chat_id}"
         tool_ctx = ToolContext(
             channel=envelope.channel,
@@ -123,6 +127,8 @@ class AgentLoop:
             )
             final_content = ""
             stream_seq = 0
+            tool_count = 0
+            total_tokens = 0
 
             # Only stream if provider actually overrides chat_stream (not base fallback)
             can_stream = (
@@ -180,6 +186,8 @@ class AgentLoop:
                         stream_seq += 1
                     if response is None:
                         response = LLMResponse(content="".join(chunks))
+                    if response.usage:
+                        total_tokens += response.usage.get("total_tokens", 0)
                     if not response.has_tool_calls:
                         final_content = response.content or "".join(chunks) or ""
                         break
@@ -193,6 +201,9 @@ class AgentLoop:
                         response = await self.provider.chat(
                             messages=messages, tools=tool_defs or None
                         )
+                    # Track tokens from every LLM response
+                    if response.usage:
+                        total_tokens += response.usage.get("total_tokens", 0)
                     if not response.has_tool_calls:
                         final_content = response.content or ""
                         break
@@ -215,6 +226,7 @@ class AgentLoop:
                 # Execute each tool, append results
                 for tc in response.tool_calls:
                     result = await self.registry.execute(tc.name, tc.arguments, call_id=tc.id, ctx=tool_ctx)
+                    tool_count += 1
                     messages.append({
                         "role": "tool",
                         "tool_call_id": result.call_id,
@@ -233,6 +245,18 @@ class AgentLoop:
             if final_content:
                 session.add_message("assistant", final_content)
             self.sessions.save(session)
+
+            # Log request-level event
+            if self._event_log:
+                latency_ms = (time.monotonic() - t0) * 1000
+                self._event_log.log_request(
+                    channel=envelope.channel,
+                    session_key=session_key,
+                    latency_ms=latency_ms,
+                    tool_count=tool_count,
+                    total_tokens=total_tokens,
+                    provider="fallback" if (self._fallback_chain and self._provider_pool) else "default",
+                )
 
             # Fire-and-forget evolution check after session save
             if self._evo_trigger:

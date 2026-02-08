@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nibot.types import ToolContext, ToolResult
+
+if TYPE_CHECKING:
+    from nibot.event_log import EventLog
 
 
 class Tool(ABC):
@@ -49,8 +53,9 @@ class Tool(ABC):
 class ToolRegistry:
     """Dynamic tool registration and execution."""
 
-    def __init__(self) -> None:
+    def __init__(self, event_log: EventLog | None = None) -> None:
         self._tools: dict[str, Tool] = {}
+        self._event_log = event_log
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -71,17 +76,21 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if not tool:
             return ToolResult(call_id=call_id, name=name, content=f"Unknown tool: {name}", is_error=True)
+        t0 = time.monotonic()
         try:
-            # Safety: receive_context() stores ctx on the shared tool instance.
-            # This is safe because asyncio is cooperative: no yield between
-            # receive_context() and execute(). Tools MUST read self._ctx into a
-            # local variable before their first await (both DelegateTool and
-            # PipelineTool do this: `ctx = self._ctx; self._ctx = None`).
             if ctx:
                 tool.receive_context(ctx)
             result = await tool.execute(**arguments)
+            duration_ms = (time.monotonic() - t0) * 1000
+            if self._event_log:
+                self._event_log.log_tool_call(tool=name, duration_ms=duration_ms, success=True)
             return ToolResult(call_id=call_id, name=name, content=result)
         except Exception as e:
+            duration_ms = (time.monotonic() - t0) * 1000
+            if self._event_log:
+                self._event_log.log_tool_call(
+                    tool=name, duration_ms=duration_ms, success=False, error=str(e)[:200],
+                )
             return ToolResult(call_id=call_id, name=name, content=f"Error: {e}", is_error=True)
 
     def has(self, name: str) -> bool:

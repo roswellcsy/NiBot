@@ -5,12 +5,15 @@ from __future__ import annotations
 import re
 import time
 from collections import deque
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nibot.config import ProviderQuotaConfig, ProvidersConfig
 from nibot.log import logger
 from nibot.provider import LiteLLMProvider, LLMProvider
 from nibot.types import LLMResponse
+
+if TYPE_CHECKING:
+    from nibot.event_log import EventLog
 
 
 class ProviderQuota:
@@ -110,11 +113,13 @@ class ProviderPool:
         providers_config: ProvidersConfig,
         default: LLMProvider,
         quota_configs: dict[str, ProviderQuotaConfig] | None = None,
+        event_log: EventLog | None = None,
     ) -> None:
         self._config = providers_config
         self._default = default
         self._cache: dict[str, LiteLLMProvider] = {}
         self._quotas: dict[str, ProviderQuota] = {}
+        self._event_log = event_log
         for name, qc in (quota_configs or {}).items():
             self._quotas[name] = ProviderQuota(name, rpm_limit=qc.rpm, tpm_limit=qc.tpm)
 
@@ -177,18 +182,53 @@ class ProviderPool:
         if not providers_to_try:
             providers_to_try = [("default", self._default)]
 
+        # Log provider selection decision
+        if self._event_log and (skipped or len(providers_to_try) > 1):
+            selected = providers_to_try[0][0] if providers_to_try else "default"
+            reason = "quota_exhausted" if skipped else "fallback_chain"
+            self._event_log.log_provider_switch(
+                chain=list(chain or []), selected=selected,
+                skipped=skipped, reason=reason,
+            )
+
         errors: list[str] = []
         for name, provider in providers_to_try:
+            t0 = time.monotonic()
             try:
                 result = await provider.chat(messages=messages, tools=tools, **kwargs)
+                latency_ms = (time.monotonic() - t0) * 1000
                 if result.finish_reason != "error":
                     self._record_success(name, result)
+                    if self._event_log:
+                        usage = result.usage or {}
+                        model = getattr(provider, "model", "")
+                        self._event_log.log_llm_call(
+                            provider=name, model=model,
+                            input_tokens=usage.get("prompt_tokens", 0),
+                            output_tokens=usage.get("completion_tokens", 0),
+                            latency_ms=latency_ms, success=True,
+                        )
                     return result
                 errors.append(f"{name}: {result.content}")
+                if self._event_log:
+                    self._event_log.log_llm_call(
+                        provider=name, model=getattr(provider, "model", ""),
+                        input_tokens=0, output_tokens=0,
+                        latency_ms=latency_ms, success=False,
+                        error=str(result.content)[:200],
+                    )
                 logger.warning(f"Provider '{name}' returned error, trying next...")
             except Exception as e:
+                latency_ms = (time.monotonic() - t0) * 1000
                 self._record_error(name, e)
                 errors.append(f"{name}: {e}")
+                if self._event_log:
+                    self._event_log.log_llm_call(
+                        provider=name, model=getattr(provider, "model", ""),
+                        input_tokens=0, output_tokens=0,
+                        latency_ms=latency_ms, success=False,
+                        error=str(e)[:200],
+                    )
                 logger.warning(f"Provider '{name}' failed: {e}, trying next...")
 
         error_detail = "; ".join(errors)
