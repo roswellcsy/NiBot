@@ -22,6 +22,7 @@ class TelegramChannel(BaseChannel):
     def __init__(self, config: TelegramChannelConfig, bus: MessageBus) -> None:
         super().__init__(config, bus)
         self._app: Any = None
+        self._stream_msgs: dict[int, int] = {}  # chat_id -> message_id for streaming edits
 
     async def start(self) -> None:
         try:
@@ -60,6 +61,13 @@ class TelegramChannel(BaseChannel):
             return
         try:
             chat_id = int(envelope.chat_id)
+            meta = envelope.metadata or {}
+
+            # Streaming chunks: edit message in place
+            if meta.get("streaming"):
+                await self._handle_stream_chunk(chat_id, envelope)
+                return
+
             # Send media first
             for media_path in (envelope.media or []):
                 await self._send_media(chat_id, Path(media_path))
@@ -71,6 +79,31 @@ class TelegramChannel(BaseChannel):
                     await self._app.bot.send_message(chat_id=chat_id, text=chunk)
         except Exception as e:
             logger.error(f"Telegram send error: {e}")
+
+    async def _handle_stream_chunk(self, chat_id: int, envelope: Envelope) -> None:
+        """Edit-in-place streaming: send first chunk, edit subsequent ones."""
+        seq = (envelope.metadata or {}).get("stream_seq", 0)
+        text = envelope.content or ""
+        if not text:
+            return
+        try:
+            if seq == 0:
+                msg = await self._app.bot.send_message(chat_id=chat_id, text=text)
+                self._stream_msgs[chat_id] = msg.message_id
+            else:
+                msg_id = self._stream_msgs.get(chat_id)
+                if msg_id:
+                    await self._app.bot.edit_message_text(
+                        chat_id=chat_id, message_id=msg_id, text=text[:_TG_MAX_LENGTH],
+                    )
+                else:
+                    msg = await self._app.bot.send_message(chat_id=chat_id, text=text)
+                    self._stream_msgs[chat_id] = msg.message_id
+        except Exception as e:
+            logger.debug(f"Telegram stream edit (seq={seq}): {e}")
+        # Clean up tracking on final chunk
+        if (envelope.metadata or {}).get("stream_done"):
+            self._stream_msgs.pop(chat_id, None)
 
     async def _send_media(self, chat_id: int, path: Path) -> None:
         if not path.exists():

@@ -27,8 +27,12 @@ class APIChannel(BaseChannel):
 
     async def send(self, envelope: Envelope) -> None:
         """Outbound messages from API channel are handled via response waiters."""
+        # Skip streaming chunks -- API is synchronous, waits for final response
+        meta = envelope.metadata or {}
+        if meta.get("streaming"):
+            return
         # Check if this message has a response_key (sync request waiting)
-        response_key = (envelope.metadata or {}).get("response_key", "")
+        response_key = meta.get("response_key", "")
         if response_key:
             self.bus.resolve_response(response_key, envelope)
         # Otherwise, it's a fire-and-forget outbound -- log and drop

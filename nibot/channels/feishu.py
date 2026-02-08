@@ -39,6 +39,10 @@ class FeishuChannel(BaseChannel):
     async def send(self, envelope: Envelope) -> None:
         if not self._client:
             return
+        # Skip intermediate streaming chunks -- only process final
+        meta = envelope.metadata or {}
+        if meta.get("streaming") and not meta.get("stream_done"):
+            return
         try:
             import json
 

@@ -13,7 +13,7 @@ from nibot.log import logger
 from nibot.provider import LLMProvider
 from nibot.registry import ToolRegistry
 from nibot.session import SessionManager
-from nibot.types import Envelope, ToolContext
+from nibot.types import Envelope, LLMResponse, ToolContext
 
 
 def _log_task_exception(task: asyncio.Task[Any]) -> None:
@@ -46,6 +46,7 @@ class AgentLoop:
         self.context_builder = context_builder
         self.max_iterations = config.agent.max_iterations
         self._gateway_tools: list[str] = config.agent.gateway_tools
+        self._streaming = config.agent.streaming
         self._evo_trigger = evo_trigger
         self._rate_limiter = rate_limiter
         self._running = False
@@ -71,7 +72,9 @@ class AgentLoop:
     async def _handle(self, envelope: Envelope) -> None:
         try:
             response = await self._process(envelope)
-            await self.bus.publish_outbound(response)
+            # Skip publishing if streaming already delivered the content
+            if not (response.metadata or {}).get("streamed"):
+                await self.bus.publish_outbound(response)
         except Exception as e:
             logger.error(f"Agent error [{envelope.channel}:{envelope.chat_id}]: {e}")
             await self.bus.publish_outbound(Envelope(
@@ -116,13 +119,74 @@ class AgentLoop:
                 else self.registry.get_definitions()
             )
             final_content = ""
+            stream_seq = 0
+
+            # Only stream if provider actually overrides chat_stream (not base fallback)
+            can_stream = (
+                self._streaming
+                and hasattr(self.provider, "chat_stream")
+                and type(self.provider).chat_stream is not LLMProvider.chat_stream
+            )
 
             for _ in range(self.max_iterations):
-                response = await self.provider.chat(messages=messages, tools=tool_defs or None)
-
-                if not response.has_tool_calls:
-                    final_content = response.content or ""
-                    break
+                if can_stream:
+                    response = None
+                    chunks: list[str] = []
+                    acc = ""
+                    # Strip response_key to prevent API waiter from resolving on chunks
+                    stream_meta = {
+                        k: v for k, v in (envelope.metadata or {}).items()
+                        if k != "response_key"
+                    }
+                    async for item in self.provider.chat_stream(
+                        messages=messages, tools=tool_defs or None
+                    ):
+                        if isinstance(item, LLMResponse):
+                            response = item
+                        elif isinstance(item, str):
+                            chunks.append(item)
+                            acc += item
+                            if len(acc) >= 30:
+                                await self.bus.publish_outbound(Envelope(
+                                    channel=envelope.channel,
+                                    chat_id=envelope.chat_id,
+                                    sender_id="assistant",
+                                    content="".join(chunks),
+                                    metadata={
+                                        **stream_meta,
+                                        "streaming": True,
+                                        "stream_seq": stream_seq,
+                                    },
+                                ))
+                                acc = ""
+                                stream_seq += 1
+                    # Always send stream_done when streaming happened
+                    if stream_seq > 0:
+                        await self.bus.publish_outbound(Envelope(
+                            channel=envelope.channel,
+                            chat_id=envelope.chat_id,
+                            sender_id="assistant",
+                            content="".join(chunks),
+                            metadata={
+                                **stream_meta,
+                                "streaming": True,
+                                "stream_seq": stream_seq,
+                                "stream_done": True,
+                            },
+                        ))
+                        stream_seq += 1
+                    if response is None:
+                        response = LLMResponse(content="".join(chunks))
+                    if not response.has_tool_calls:
+                        final_content = response.content or "".join(chunks) or ""
+                        break
+                else:
+                    response = await self.provider.chat(
+                        messages=messages, tools=tool_defs or None
+                    )
+                    if not response.has_tool_calls:
+                        final_content = response.content or ""
+                        break
 
                 # Append assistant message with tool_calls
                 tc_dicts: list[dict[str, Any]] = [
@@ -167,12 +231,15 @@ class AgentLoop:
                 self._bg_tasks.add(t)
                 t.add_done_callback(lambda done: (self._bg_tasks.discard(done), _log_task_exception(done)))
 
+        out_meta = dict(envelope.metadata or {})
+        if stream_seq > 0:
+            out_meta["streamed"] = True
         return Envelope(
             channel=envelope.channel,
             chat_id=envelope.chat_id,
             sender_id="assistant",
             content=final_content,
-            metadata=envelope.metadata,
+            metadata=out_meta,
         )
 
     def stop(self) -> None:

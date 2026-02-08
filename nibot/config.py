@@ -104,6 +104,7 @@ class AgentConfig(BaseModel):
     gateway_tools: list[str] = Field(default_factory=list)
     auto_evolution: bool = False
     provider_fallback_chain: list[str] = Field(default_factory=list)
+    streaming: bool = True
 
 
 class TelegramChannelConfig(BaseModel):

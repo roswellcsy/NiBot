@@ -33,10 +33,15 @@ class LLMProvider(ABC):
         model: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.7,
-    ) -> AsyncIterator[str]:
-        """Stream text chunks. Default falls back to non-streaming."""
+    ) -> AsyncIterator[str | LLMResponse]:
+        """Stream text chunks. Yields str for text, LLMResponse for tool calls.
+
+        Default falls back to non-streaming chat().
+        """
         resp = await self.chat(messages, tools, model, max_tokens, temperature)
-        if resp.content:
+        if resp.has_tool_calls:
+            yield resp
+        elif resp.content:
             yield resp.content
 
 
@@ -130,13 +135,22 @@ class LiteLLMProvider(LLMProvider):
         model: str = "",
         max_tokens: int = 0,
         temperature: float = -1.0,
-    ) -> AsyncIterator[str]:
-        """Stream text chunks. Falls back to non-streaming when tools are present."""
+    ) -> AsyncIterator[str | LLMResponse]:
+        """Stream text chunks, then yield final LLMResponse.
+
+        When tools are present, falls back to non-streaming chat().
+        Yields LLMResponse with tool_calls if LLM chose to call tools.
+        """
         if tools:
             resp = await self.chat(messages, tools, model, max_tokens, temperature)
+            if resp.has_tool_calls:
+                yield resp
+                return
             if resp.content:
                 yield resp.content
+            yield resp
             return
+
         from litellm import acompletion
 
         model = model or self.model
@@ -153,13 +167,16 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_base"] = self.api_base
         try:
             resp = await acompletion(**kwargs)
+            full: list[str] = []
             async for chunk in resp:
                 delta = chunk.choices[0].delta
                 if hasattr(delta, "content") and delta.content:
+                    full.append(delta.content)
                     yield delta.content
+            yield LLMResponse(content="".join(full))
         except Exception as e:
             logger.error(f"LLM stream failed: {e}")
-            yield f"LLM error: {type(e).__name__}"
+            yield LLMResponse(content=f"LLM error: {type(e).__name__}", finish_reason="error")
 
     def _parse(self, resp: Any) -> LLMResponse:
         choice = resp.choices[0]
