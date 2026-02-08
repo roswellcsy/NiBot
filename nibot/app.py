@@ -171,6 +171,9 @@ class NiBot:
         self._web_panel = None
         await self._start_web_panel()
 
+        # Start vault channel (file system watcher)
+        await self._start_vault_channel()
+
         logger.info(f"NiBot starting -- model={self.config.agent.model}, "
                      f"workspace={self.workspace}, channels={len(self._channels)}")
 
@@ -381,6 +384,15 @@ class NiBot:
             app=self, host=wp_cfg.host, port=wp_cfg.port, auth_token=wp_cfg.auth_token,
         )
         await self._web_panel.start()
+
+    async def _start_vault_channel(self) -> None:
+        """Start vault file-watcher channel if enabled."""
+        vault_cfg = self.config.channels.vault
+        if not vault_cfg.enabled or not vault_cfg.watch_dir:
+            return
+        from nibot.channels.vault import VaultChannel
+        ch = VaultChannel(vault_cfg, self.bus, workspace=self.workspace)
+        self.add_channel(ch)
 
     def _resolve_provider_credentials(self, model: str) -> tuple[str, str]:
         from nibot.config import MODEL_PROVIDER_PREFIXES

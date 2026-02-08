@@ -128,12 +128,24 @@ class DiscordChannelConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)
 
 
+class VaultChannelConfig(BaseModel):
+    enabled: bool = False
+    watch_dir: str = ""
+    output_dir: str = ""
+    poll_interval: int = 10
+    notify_channel: str = ""
+    notify_chat_id: str = ""
+    tasks: dict[str, str] = Field(default_factory=dict)
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class ChannelsConfig(BaseModel):
     telegram: TelegramChannelConfig = Field(default_factory=TelegramChannelConfig)
     feishu: FeishuChannelConfig = Field(default_factory=FeishuChannelConfig)
     discord: DiscordChannelConfig = Field(default_factory=DiscordChannelConfig)
     wecom: "WeComChannelConfig" = Field(default_factory=lambda: WeComChannelConfig())
     api: "APIChannelConfig" = Field(default_factory=lambda: APIChannelConfig())
+    vault: VaultChannelConfig = Field(default_factory=VaultChannelConfig)
 
 
 class ProviderQuotaConfig(BaseModel):
