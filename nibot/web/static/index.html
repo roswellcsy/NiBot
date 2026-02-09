@@ -63,7 +63,19 @@ nav a.active{background:#0066cc;color:#fff}
 </head>
 <body>
 <div class="container" x-data="dashboard()" x-init="init()">
-  <h1>NiBot Dashboard</h1>
+  <!-- Token prompt -->
+  <div x-show="showTokenPrompt" style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:100">
+    <div class="card" style="width:360px;text-align:center">
+      <h2 style="margin-bottom:16px">Authentication Required</h2>
+      <input type="password" x-model="authToken" @keydown.enter="saveToken()" placeholder="Enter auth token"
+             style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-bottom:12px">
+      <button class="btn btn-primary" style="width:100%" @click="saveToken()">Login</button>
+    </div>
+  </div>
+
+  <h1 style="display:flex;align-items:center;gap:12px">NiBot Dashboard
+    <button x-show="authToken && !showTokenPrompt" class="btn btn-sm btn-secondary" @click="logout()" style="font-size:11px">Logout</button>
+  </h1>
 
   <nav>
     <a href="#" :class="{'active': tab==='chat'}" @click.prevent="tab='chat';loadChatSessions()">Chat</a>
@@ -281,14 +293,30 @@ function dashboard(){return{
   tab:'chat',health:{},analytics:{},sessions:[],skills:[],tasks:[],config:{},
   expandedSession:'',sessionMessages:[],
   chatSessions:[],currentChatId:'',chatMessages:[],chatInput:'',chatLoading:false,chatStreamContent:'',
+  authToken:'',showTokenPrompt:false,
   async init(){
+    this.authToken=localStorage.getItem('nibot_token')||new URLSearchParams(location.search).get('token')||'';
+    if(!this.authToken){this.showTokenPrompt=true;return}
     await this.loadHealth();
     await this.loadAnalytics();
     this.loadChatSessions();
     setInterval(()=>this.loadHealth(),10000);
   },
-  async api(path,opts){
-    try{const r=await fetch('/api/'+path,opts);return await r.json()}catch(e){return{}}
+  saveToken(){
+    this.authToken=this.authToken.trim();
+    if(!this.authToken)return;
+    localStorage.setItem('nibot_token',this.authToken);
+    this.showTokenPrompt=false;
+    this.init();
+  },
+  logout(){localStorage.removeItem('nibot_token');this.authToken='';this.showTokenPrompt=true},
+  async api(path,opts={}){
+    try{
+      opts.headers={...(opts.headers||{}),'Authorization':'Bearer '+this.authToken};
+      const r=await fetch('/api/'+path,opts);
+      if(r.status===401){this.showTokenPrompt=true;return{}}
+      return await r.json();
+    }catch(e){return{}}
   },
   async loadHealth(){this.health=await this.api('health')},
   async loadAnalytics(){this.analytics=await this.api('analytics')},
@@ -351,7 +379,7 @@ function dashboard(){return{
     this.currentChatId=res.chat_id;
     this.chatStreamContent='';
 
-    const es=new EventSource('/api/chat/stream?id='+res.stream_id);
+    const es=new EventSource('/api/chat/stream?id='+res.stream_id+'&token='+encodeURIComponent(this.authToken));
     es.onmessage=(e)=>{
       if(e.data==='[DONE]'){
         es.close();
