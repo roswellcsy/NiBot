@@ -80,12 +80,12 @@ run_test() {
             fi
             ;;
         regex)
-            if echo "$body" | grep -qP "$check"; then
+            if echo "$body" | grep -qE "$check"; then
                 result="PASS"
             fi
             ;;
         cjk)
-            if echo "$body" | grep -qP '[\x{4e00}-\x{9fff}\x{3040}-\x{309f}\x{30a0}-\x{30ff}]'; then
+            if python3 -c "import sys; sys.exit(0 if any(0x4e00<=ord(c)<=0x9fff or 0x3040<=ord(c)<=0x30ff for c in sys.stdin.read()) else 1)" <<< "$body"; then
                 result="PASS"
             fi
             ;;
