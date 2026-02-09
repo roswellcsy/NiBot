@@ -30,6 +30,7 @@ tr.clickable:hover{background:#f8f9fa}
 .btn-danger{background:#dc3545;color:#fff}
 .btn-secondary{background:#6c757d;color:#fff}
 .btn:hover{opacity:.85}
+.btn:disabled{opacity:.5;cursor:not-allowed}
 nav{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
 nav a{padding:8px 16px;background:#fff;border-radius:6px;text-decoration:none;color:#333;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 nav a.active{background:#0066cc;color:#fff}
@@ -46,6 +47,17 @@ nav a.active{background:#0066cc;color:#fff}
 .config-item .key{font-size:12px;color:#666;font-weight:600;text-transform:uppercase}
 .config-item .value{font-size:16px;font-weight:600;margin-top:4px}
 .toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center}
+.chat-layout{display:flex;gap:16px;height:calc(100vh - 140px)}
+.chat-sidebar{width:240px;flex-shrink:0;overflow-y:auto}
+.chat-main{flex:1;display:flex;flex-direction:column}
+.chat-scroll{flex:1;overflow-y:auto;padding:12px}
+.chat-input-bar{border-top:1px solid #eee;padding:12px;display:flex;gap:8px}
+.chat-input-bar input{flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none}
+.chat-input-bar input:focus{border-color:#0066cc}
+.chat-session-item{padding:8px 10px;cursor:pointer;border-radius:4px;margin-bottom:4px;font-size:13px}
+.chat-session-item:hover{background:#f0f0f0}
+.chat-session-item.active{background:#e3f2fd}
+@media(max-width:768px){.chat-sidebar{display:none}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
 </head>
@@ -54,12 +66,58 @@ nav a.active{background:#0066cc;color:#fff}
   <h1>NiBot Dashboard</h1>
 
   <nav>
+    <a href="#" :class="{'active': tab==='chat'}" @click.prevent="tab='chat';loadChatSessions()">Chat</a>
     <a href="#" :class="{'active': tab==='overview'}" @click.prevent="tab='overview'">Overview</a>
     <a href="#" :class="{'active': tab==='sessions'}" @click.prevent="tab='sessions';loadSessions()">Sessions</a>
     <a href="#" :class="{'active': tab==='skills'}" @click.prevent="tab='skills';loadSkills()">Skills</a>
     <a href="#" :class="{'active': tab==='tasks'}" @click.prevent="tab='tasks';loadTasks()">Tasks</a>
     <a href="#" :class="{'active': tab==='config'}" @click.prevent="tab='config';loadConfig()">Config</a>
   </nav>
+
+  <!-- Chat -->
+  <div x-show="tab==='chat'" class="chat-layout">
+    <div class="card chat-sidebar">
+      <div class="toolbar">
+        <h2 style="margin-bottom:0">Chats</h2>
+        <button class="btn btn-sm btn-primary" @click="newChat()">+ New</button>
+      </div>
+      <div style="margin-top:8px">
+        <template x-for="s in chatSessions" :key="s.key">
+          <div class="chat-session-item"
+               :class="{'active': currentChatId===s.key.replace('web:','')}"
+               @click="switchChat(s.key.replace('web:',''))">
+            <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                 x-text="s.last_user_msg||s.key.replace('web:','')"></div>
+            <div style="font-size:11px;color:#999;margin-top:2px" x-text="s.messages+' msgs'"></div>
+          </div>
+        </template>
+        <p x-show="chatSessions.length===0" class="loading" style="padding:8px">No conversations yet</p>
+      </div>
+    </div>
+    <div class="card chat-main">
+      <div class="chat-scroll" x-ref="chatScroll">
+        <template x-for="(m,i) in chatMessages" :key="i">
+          <div class="msg" :class="'msg-'+m.role">
+            <div class="msg-role" x-text="m.role"></div>
+            <div class="msg-content" x-text="m.content"></div>
+          </div>
+        </template>
+        <div x-show="chatStreamContent" class="msg msg-assistant">
+          <div class="msg-role">assistant</div>
+          <div class="msg-content" x-text="chatStreamContent"></div>
+        </div>
+        <div x-show="chatLoading && !chatStreamContent" class="loading" style="padding:8px">Thinking...</div>
+        <p x-show="!chatLoading && chatMessages.length===0 && !chatStreamContent" class="loading" style="padding:20px;text-align:center">
+          Send a message to start chatting
+        </p>
+      </div>
+      <div class="chat-input-bar">
+        <input type="text" x-model="chatInput" @keydown.enter="sendChat()"
+               placeholder="Type a message..." :disabled="chatLoading">
+        <button class="btn btn-primary" @click="sendChat()" :disabled="chatLoading || !chatInput.trim()">Send</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Overview -->
   <div x-show="tab==='overview'">
@@ -220,11 +278,13 @@ nav a.active{background:#0066cc;color:#fff}
 
 <script>
 function dashboard(){return{
-  tab:'overview',health:{},analytics:{},sessions:[],skills:[],tasks:[],config:{},
+  tab:'chat',health:{},analytics:{},sessions:[],skills:[],tasks:[],config:{},
   expandedSession:'',sessionMessages:[],
+  chatSessions:[],currentChatId:'',chatMessages:[],chatInput:'',chatLoading:false,chatStreamContent:'',
   async init(){
     await this.loadHealth();
     await this.loadAnalytics();
+    this.loadChatSessions();
     setInterval(()=>this.loadHealth(),10000);
   },
   async api(path,opts){
@@ -250,6 +310,76 @@ function dashboard(){return{
   async reloadSkills(){
     await this.api('skills/reload',{method:'POST'});
     await this.loadSkills();
+  },
+  // ---- Chat ----
+  async loadChatSessions(){
+    const d=await this.api('chat/sessions');
+    this.chatSessions=d.sessions||[];
+  },
+  newChat(){
+    this.currentChatId='';
+    this.chatMessages=[];
+    this.chatStreamContent='';
+    this.chatInput='';
+  },
+  async switchChat(id){
+    this.currentChatId=id;
+    this.chatStreamContent='';
+    const d=await this.api('chat/history?chat_id='+encodeURIComponent(id));
+    this.chatMessages=d.messages||[];
+    this.$nextTick(()=>{const el=this.$refs.chatScroll;if(el)el.scrollTop=el.scrollHeight;});
+  },
+  async sendChat(){
+    const msg=this.chatInput.trim();
+    if(!msg||this.chatLoading)return;
+    this.chatInput='';
+    this.chatLoading=true;
+    this.chatMessages.push({role:'user',content:msg,timestamp:new Date().toISOString()});
+    this.$nextTick(()=>{const el=this.$refs.chatScroll;if(el)el.scrollTop=el.scrollHeight;});
+
+    const res=await this.api('chat/send',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({content:msg,chat_id:this.currentChatId})
+    });
+
+    if(res.error){
+      this.chatMessages.push({role:'assistant',content:'Error: '+res.error});
+      this.chatLoading=false;
+      return;
+    }
+    this.currentChatId=res.chat_id;
+    this.chatStreamContent='';
+
+    const es=new EventSource('/api/chat/stream?id='+res.stream_id);
+    es.onmessage=(e)=>{
+      if(e.data==='[DONE]'){
+        es.close();
+        if(this.chatStreamContent){
+          this.chatMessages.push({role:'assistant',content:this.chatStreamContent,timestamp:new Date().toISOString()});
+        }
+        this.chatStreamContent='';
+        this.chatLoading=false;
+        this.loadChatSessions();
+        this.$nextTick(()=>{const el=this.$refs.chatScroll;if(el)el.scrollTop=el.scrollHeight;});
+        return;
+      }
+      try{
+        const data=JSON.parse(e.data);
+        this.chatStreamContent=data.content||'';
+        this.$nextTick(()=>{const el=this.$refs.chatScroll;if(el)el.scrollTop=el.scrollHeight;});
+      }catch(err){}
+    };
+    es.onerror=()=>{
+      es.close();
+      if(this.chatStreamContent){
+        this.chatMessages.push({role:'assistant',content:this.chatStreamContent,timestamp:new Date().toISOString()});
+      }else if(this.chatLoading){
+        this.chatMessages.push({role:'assistant',content:'(connection lost)'});
+      }
+      this.chatStreamContent='';
+      this.chatLoading=false;
+    };
   },
 }}
 </script>

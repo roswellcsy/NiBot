@@ -1,16 +1,20 @@
 """Web panel route handlers."""
 from __future__ import annotations
 
+import asyncio
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from nibot.types import Envelope
+
 
 async def handle_route(
     app: Any, method: str, path: str, body: bytes, static_dir: Path,
-) -> dict[str, Any] | bytes:
-    """Route dispatcher. Returns dict (JSON) or bytes (static file)."""
+) -> Any:
+    """Route dispatcher. Returns dict (JSON), bytes (static file), or SSEResponse."""
 
     # Parse query string
     parsed = urlparse(path)
@@ -24,7 +28,20 @@ async def handle_route(
             return index.read_bytes()
         return {"error": "dashboard not found"}
 
-    # API routes
+    # Chat API routes
+    if clean_path == "/api/chat/send" and method == "POST":
+        return await _chat_send(app, body)
+    if clean_path == "/api/chat/stream":
+        stream_id = query.get("id", [""])[0]
+        return _chat_stream(app, stream_id)
+    if clean_path == "/api/chat/sessions":
+        return _chat_sessions(app)
+    if clean_path == "/api/chat/history":
+        chat_id = query.get("chat_id", [""])[0]
+        limit = int(query.get("limit", ["50"])[0])
+        return _chat_history(app, chat_id, limit)
+
+    # Management API routes
     if clean_path == "/api/health":
         return _health(app)
     if clean_path == "/api/sessions":
@@ -164,4 +181,115 @@ def _tasks(app: Any) -> dict[str, Any]:
             }
             for t in tasks
         ]
+    }
+
+
+# ---- Web Chat API ----
+
+
+async def _chat_send(app: Any, body: bytes) -> dict[str, Any]:
+    """Send a chat message and return a stream_id for SSE consumption."""
+    data = json.loads(body) if body else {}
+    content = data.get("content", "").strip()
+    chat_id = data.get("chat_id", "")
+
+    if not content:
+        return {"error": "empty content", "status": 400}
+
+    if not chat_id:
+        chat_id = f"web_{uuid.uuid4().hex[:8]}"
+
+    stream_id = uuid.uuid4().hex[:12]
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    streams: dict[str, asyncio.Queue[Any]] = getattr(app, "_web_streams", {})
+    streams[stream_id] = queue
+
+    await app.bus.publish_inbound(Envelope(
+        channel="web",
+        chat_id=chat_id,
+        sender_id="web_user",
+        content=content,
+        metadata={"stream_id": stream_id},
+    ))
+
+    # Auto-cleanup after 5 minutes
+    async def _cleanup() -> None:
+        await asyncio.sleep(300.0)
+        streams.pop(stream_id, None)
+
+    asyncio.create_task(_cleanup())
+
+    return {"stream_id": stream_id, "chat_id": chat_id}
+
+
+def _chat_stream(app: Any, stream_id: str) -> Any:
+    """Return an SSEResponse that streams agent output to the client."""
+    from nibot.web.server import SSEResponse
+
+    if not stream_id:
+        return {"error": "id parameter required", "status": 400}
+
+    streams: dict[str, asyncio.Queue[Any]] = getattr(app, "_web_streams", {})
+    queue = streams.get(stream_id)
+    if not queue:
+        return {"error": "stream not found", "status": 404}
+
+    async def _sse_handler(writer: asyncio.StreamWriter) -> None:
+        headers = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/event-stream\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: keep-alive\r\n"
+            "Access-Control-Allow-Origin: *\r\n\r\n"
+        )
+        writer.write(headers.encode())
+        await writer.drain()
+        try:
+            while True:
+                item = await asyncio.wait_for(queue.get(), timeout=120.0)
+                if item is None:
+                    writer.write(b"data: [DONE]\n\n")
+                    await writer.drain()
+                    break
+                event = json.dumps(item, ensure_ascii=False)
+                writer.write(f"data: {event}\n\n".encode())
+                await writer.drain()
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            pass
+        finally:
+            streams.pop(stream_id, None)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    return SSEResponse(handler=_sse_handler)
+
+
+def _chat_sessions(app: Any) -> dict[str, Any]:
+    """List web chat sessions (key starts with 'web:')."""
+    all_sessions = app.sessions.query_recent(limit=50)
+    web_sessions = [s for s in all_sessions if s["key"].startswith("web:")]
+    return {"sessions": web_sessions}
+
+
+def _chat_history(app: Any, chat_id: str, limit: int = 50) -> dict[str, Any]:
+    """Get message history for a web chat session."""
+    if not chat_id:
+        return {"error": "chat_id parameter required", "status": 400}
+    key = f"web:{chat_id}" if not chat_id.startswith("web:") else chat_id
+    messages = app.sessions.get_session_messages(key, limit=limit)
+    return {
+        "chat_id": chat_id,
+        "messages": [
+            {
+                "role": m.get("role", ""),
+                "content": (m.get("content") or "")[:4000],
+                "timestamp": m.get("timestamp", ""),
+            }
+            for m in messages
+            if m.get("role") in ("user", "assistant")
+        ],
     }

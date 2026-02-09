@@ -68,6 +68,34 @@ NiBot v1.2+ 方向参考。记录值得借鉴的开源项目和技术文章。
 
 ---
 
+## Happy
+
+- **仓库**: github.com/slopus/happy
+- **Stars**: 10.8k
+- **定位**: 跨平台 AI Agent 远程监控/对话客户端
+- **核心架构**: React Native + Expo + Socket.IO + PostgreSQL + E2E 加密
+
+**技术栈**:
+- 前端: React Native (Expo Router)，支持 iOS/Android/Web
+- 通信: Socket.IO WebSocket，实时流式传输
+- 存储: PostgreSQL + Drizzle ORM
+- 安全: libsodium E2E 加密
+
+**NiBot 融合决策**:
+
+Happy 是重量级方案（React Native + Socket.IO + PostgreSQL）。NiBot 保持零依赖哲学（纯 asyncio.start_server + Alpine.js），只吸收**概念**：
+
+| 概念 | Happy 实现 | NiBot 采用 |
+|------|-----------|-----------|
+| Web 聊天界面 | React Native + Socket.IO | Alpine.js + SSE (Server-Sent Events) |
+| 实时流式传输 | WebSocket 双向通信 | SSE 单向推送（POST 发消息，GET/SSE 读流） |
+| 会话管理切换 | PostgreSQL 持久化 | 复用 SessionManager，web: 前缀隔离 |
+| 移动端适配 | React Native 原生 | CSS @media 响应式 |
+
+**实现**: v1.2 Web Chat tab -- 4 个新 API 端点 + bus subscriber + SSE 流
+
+---
+
 ## v1.2+ 综合优先级
 
 | 优先级 | 方向 | 来源 | 说明 |
@@ -76,5 +104,6 @@ NiBot v1.2+ 方向参考。记录值得借鉴的开源项目和技术文章。
 | 高 | Agent 自生成技能 | Pi/Ronacher | 从 SKILL.md 到可执行脚本 |
 | 中 | 工具沙箱化 | OpenClaw/Nanobot | 高危工具独立容器执行 |
 | 中 | 管理面板增强 | 用户需求 | 支持通过 UI 修改配置 |
+| 已完成 | Web 聊天界面 | Happy | SSE 流式对话 + 会话管理，v1.2 已实现 |
 | 低 | Agent 间双向通信 | OpenClaw | SubagentManager 加 notify_parent |
 | 低 | 会话分支树 | Pi-Mono | 子 Agent 实验不污染主会话 |

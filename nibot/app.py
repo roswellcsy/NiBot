@@ -384,6 +384,28 @@ class NiBot:
         wp_cfg = self.config.web_panel
         if not wp_cfg.enabled:
             return
+
+        # Per-stream queues for web chat SSE
+        self._web_streams: dict[str, asyncio.Queue[Any]] = {}
+
+        async def _web_outbound(envelope: "Envelope") -> None:
+            meta = envelope.metadata or {}
+            stream_id = meta.get("stream_id", "")
+            if not stream_id:
+                return
+            queue = self._web_streams.get(stream_id)
+            if not queue:
+                return
+            if meta.get("streaming"):
+                await queue.put({"type": "chunk", "content": envelope.content})
+                if meta.get("stream_done"):
+                    await queue.put(None)
+            else:
+                await queue.put({"type": "done", "content": envelope.content})
+                await queue.put(None)
+
+        self.bus.subscribe_outbound("web", _web_outbound)
+
         from nibot.web.server import WebPanel
         self._web_panel = WebPanel(
             app=self, host=wp_cfg.host, port=wp_cfg.port, auth_token=wp_cfg.auth_token,

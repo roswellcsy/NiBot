@@ -1,10 +1,12 @@
-"""Web panel HTTP server -- aiohttp-based management interface."""
+"""Web panel HTTP server -- asyncio-based management interface."""
 from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
+from urllib.parse import parse_qs, urlparse
 
 from nibot.log import logger
 
@@ -13,6 +15,12 @@ if TYPE_CHECKING:
 
 
 _MAX_BODY = 1_048_576  # 1 MB
+
+
+@dataclass
+class SSEResponse:
+    """Sentinel: route handler wants to stream SSE to the client."""
+    handler: Callable[[asyncio.StreamWriter], Awaitable[None]]
 
 
 class WebPanel:
@@ -43,6 +51,7 @@ class WebPanel:
             await self._server.wait_closed()
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        sse_handled = False
         try:
             line = await asyncio.wait_for(reader.readline(), timeout=5.0)
             parts = line.decode("utf-8", errors="replace").split()
@@ -73,6 +82,10 @@ class WebPanel:
             if path.startswith("/api/") and self._auth_token:
                 auth = headers.get("authorization", "")
                 token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
+                # Fallback: query param ?token=xxx (EventSource can't set headers)
+                if not token:
+                    qs = parse_qs(urlparse(path).query)
+                    token = qs.get("token", [""])[0]
                 if token != self._auth_token:
                     await self._respond(writer, {"error": "unauthorized"}, status=401)
                     return
@@ -80,7 +93,10 @@ class WebPanel:
             from nibot.web.routes import handle_route
             result = await handle_route(self._app, method, path, body, self._static_dir)
 
-            if isinstance(result, bytes):
+            if isinstance(result, SSEResponse):
+                sse_handled = True
+                await result.handler(writer)
+            elif isinstance(result, bytes):
                 # Static file
                 content_type = "text/html" if path.endswith(".html") or path == "/" else "application/octet-stream"
                 resp = (f"HTTP/1.1 200 OK\r\n"
@@ -91,15 +107,17 @@ class WebPanel:
             else:
                 status_code = result.pop("status", 200) if isinstance(result.get("status"), int) else 200
                 await self._respond(writer, result, status=status_code)
-            await writer.drain()
+            if not sse_handled:
+                await writer.drain()
         except Exception as e:
             logger.debug(f"Web panel error: {e}")
         finally:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
+            if not sse_handled:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
 
     async def _respond(self, writer: asyncio.StreamWriter, data: dict[str, Any],
                       status: int = 200) -> None:
