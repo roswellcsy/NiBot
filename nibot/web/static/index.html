@@ -57,6 +57,9 @@ nav a.active{background:#0066cc;color:#fff}
 .chat-session-item{padding:8px 10px;cursor:pointer;border-radius:4px;margin-bottom:4px;font-size:13px}
 .chat-session-item:hover{background:#f0f0f0}
 .chat-session-item.active{background:#e3f2fd}
+.chat-progress{padding:8px 16px;color:#666;font-size:13px}
+.progress-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4a9eff;animation:pulse 1s infinite;margin-right:6px;vertical-align:middle}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 @media(max-width:768px){.chat-sidebar{display:none}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
@@ -118,7 +121,10 @@ nav a.active{background:#0066cc;color:#fff}
           <div class="msg-role">assistant</div>
           <div class="msg-content" x-text="chatStreamContent"></div>
         </div>
-        <div x-show="chatLoading && !chatStreamContent" class="loading" style="padding:8px">Thinking...</div>
+        <div x-show="chatLoading && !chatStreamContent" class="chat-progress">
+          <span class="progress-dot"></span>
+          <span x-text="chatProgress || 'Thinking...'"></span>
+        </div>
         <p x-show="!chatLoading && chatMessages.length===0 && !chatStreamContent" class="loading" style="padding:20px;text-align:center">
           Send a message to start chatting
         </p>
@@ -292,7 +298,7 @@ nav a.active{background:#0066cc;color:#fff}
 function dashboard(){return{
   tab:'chat',health:{},analytics:{},sessions:[],skills:[],tasks:[],config:{},
   expandedSession:'',sessionMessages:[],
-  chatSessions:[],currentChatId:'',chatMessages:[],chatInput:'',chatLoading:false,chatStreamContent:'',
+  chatSessions:[],currentChatId:'',chatMessages:[],chatInput:'',chatLoading:false,chatStreamContent:'',chatProgress:'',
   authToken:'',showTokenPrompt:false,
   async init(){
     this.authToken=localStorage.getItem('nibot_token')||new URLSearchParams(location.search).get('token')||'';
@@ -348,6 +354,7 @@ function dashboard(){return{
     this.currentChatId='';
     this.chatMessages=[];
     this.chatStreamContent='';
+    this.chatProgress='';
     this.chatInput='';
   },
   async switchChat(id){
@@ -378,6 +385,7 @@ function dashboard(){return{
     }
     this.currentChatId=res.chat_id;
     this.chatStreamContent='';
+    this.chatProgress='';
 
     const es=new EventSource('/api/chat/stream?id='+res.stream_id+'&token='+encodeURIComponent(this.authToken));
     es.onmessage=(e)=>{
@@ -387,6 +395,7 @@ function dashboard(){return{
           this.chatMessages.push({role:'assistant',content:this.chatStreamContent,timestamp:new Date().toISOString()});
         }
         this.chatStreamContent='';
+        this.chatProgress='';
         this.chatLoading=false;
         this.loadChatSessions();
         this.$nextTick(()=>{const el=this.$refs.chatScroll;if(el)el.scrollTop=el.scrollHeight;});
@@ -394,7 +403,20 @@ function dashboard(){return{
       }
       try{
         const data=JSON.parse(e.data);
-        this.chatStreamContent=data.content||'';
+        if(data.type==='progress'){
+          if(data.event==='thinking'){
+            this.chatProgress='Thinking ('+data.iteration+'/'+data.max_iterations+')...';
+            this.chatStreamContent='';
+          }else if(data.event==='tool_start'){
+            this.chatProgress='Calling '+data.tool_name+'...';
+          }else if(data.event==='tool_done'){
+            this.chatProgress=data.tool_name+' done ('+data.elapsed+'s)';
+          }
+        }else if(data.type==='chunk'){
+          this.chatStreamContent+=data.content||'';
+        }else if(data.type==='done'){
+          this.chatStreamContent=data.content||'';
+        }
         this.$nextTick(()=>{const el=this.$refs.chatScroll;if(el)el.scrollTop=el.scrollHeight;});
       }catch(err){}
     };
@@ -406,6 +428,7 @@ function dashboard(){return{
         this.chatMessages.push({role:'assistant',content:'(connection lost)'});
       }
       this.chatStreamContent='';
+      this.chatProgress='';
       this.chatLoading=false;
     };
   },

@@ -139,7 +139,22 @@ class AgentLoop:
                 and type(self.provider).chat_stream is not LLMProvider.chat_stream
             )
 
-            for _ in range(self.max_iterations):
+            for _iteration in range(self.max_iterations):
+                # Progress: thinking event
+                _sid = (envelope.metadata or {}).get("stream_id")
+                if _sid:
+                    _pmeta = {
+                        k: v for k, v in (envelope.metadata or {}).items()
+                        if k != "response_key"
+                    }
+                    await self.bus.publish_outbound(Envelope(
+                        channel=envelope.channel, chat_id=envelope.chat_id,
+                        sender_id="assistant", content="",
+                        metadata={**_pmeta, "progress": "thinking",
+                                  "iteration": _iteration + 1,
+                                  "max_iterations": self.max_iterations},
+                    ))
+
                 if can_stream:
                     response = None
                     chunks: list[str] = []
@@ -183,6 +198,9 @@ class AgentLoop:
                                 "streaming": True,
                                 "stream_seq": stream_seq,
                                 "stream_done": True,
+                                "has_tool_calls": bool(
+                                    response and response.has_tool_calls
+                                ),
                             },
                         ))
                         stream_seq += 1
@@ -227,8 +245,26 @@ class AgentLoop:
 
                 # Execute each tool, append results
                 for tc in response.tool_calls:
+                    # Progress: tool_start
+                    if _sid:
+                        await self.bus.publish_outbound(Envelope(
+                            channel=envelope.channel, chat_id=envelope.chat_id,
+                            sender_id="assistant", content="",
+                            metadata={**_pmeta, "progress": "tool_start",
+                                      "tool_name": tc.name},
+                        ))
+                    _t0_tool = time.monotonic()
                     result = await self.registry.execute(tc.name, tc.arguments, call_id=tc.id, ctx=tool_ctx)
                     tool_count += 1
+                    # Progress: tool_done
+                    if _sid:
+                        await self.bus.publish_outbound(Envelope(
+                            channel=envelope.channel, chat_id=envelope.chat_id,
+                            sender_id="assistant", content="",
+                            metadata={**_pmeta, "progress": "tool_done",
+                                      "tool_name": tc.name,
+                                      "elapsed": round(time.monotonic() - _t0_tool, 1)},
+                        ))
                     messages.append({
                         "role": "tool",
                         "tool_call_id": result.call_id,

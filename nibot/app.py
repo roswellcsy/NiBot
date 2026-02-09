@@ -396,10 +396,24 @@ class NiBot:
             queue = self._web_streams.get(stream_id)
             if not queue:
                 return
+            # Progress events (thinking / tool_start / tool_done)
+            progress = meta.get("progress")
+            if progress:
+                await queue.put({
+                    "type": "progress",
+                    "event": progress,
+                    "tool_name": meta.get("tool_name", ""),
+                    "iteration": meta.get("iteration", 0),
+                    "max_iterations": meta.get("max_iterations", 0),
+                    "elapsed": meta.get("elapsed", 0),
+                })
+                return
             if meta.get("streaming"):
                 await queue.put({"type": "chunk", "content": envelope.content})
                 if meta.get("stream_done"):
-                    await queue.put(None)
+                    # Only close SSE when no tool_calls follow
+                    if not meta.get("has_tool_calls"):
+                        await queue.put(None)
             else:
                 await queue.put({"type": "done", "content": envelope.content})
                 await queue.put(None)

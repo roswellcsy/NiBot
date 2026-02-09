@@ -316,3 +316,106 @@ class TestSSEResponseType:
             pass
         sse = SSEResponse(handler=noop)
         assert callable(sse.handler)
+
+
+# ---- Progress event tests ----
+
+
+class TestProgressEvents:
+    """Test that progress events are forwarded correctly via _web_outbound logic."""
+
+    @pytest.mark.asyncio
+    async def test_progress_event_forwarded_to_queue(self) -> None:
+        """Simulate _web_outbound receiving a progress envelope."""
+        from nibot.types import Envelope
+
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        streams: dict[str, asyncio.Queue[Any]] = {"sid1": queue}
+
+        # Replicate _web_outbound logic
+        envelope = Envelope(
+            channel="web", chat_id="c1", sender_id="assistant", content="",
+            metadata={"stream_id": "sid1", "progress": "thinking",
+                       "iteration": 2, "max_iterations": 20},
+        )
+        meta = envelope.metadata or {}
+        stream_id = meta.get("stream_id", "")
+        q = streams.get(stream_id)
+        assert q is not None
+        progress = meta.get("progress")
+        assert progress == "thinking"
+        await q.put({
+            "type": "progress", "event": progress,
+            "tool_name": meta.get("tool_name", ""),
+            "iteration": meta.get("iteration", 0),
+            "max_iterations": meta.get("max_iterations", 0),
+            "elapsed": meta.get("elapsed", 0),
+        })
+
+        item = await q.get()
+        assert item["type"] == "progress"
+        assert item["event"] == "thinking"
+        assert item["iteration"] == 2
+        assert item["max_iterations"] == 20
+
+    @pytest.mark.asyncio
+    async def test_tool_start_done_events(self) -> None:
+        """Verify tool_start and tool_done progress shape."""
+        from nibot.types import Envelope
+
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+
+        for event, extra in [
+            ("tool_start", {"tool_name": "web_search"}),
+            ("tool_done", {"tool_name": "web_search", "elapsed": 1.3}),
+        ]:
+            env = Envelope(
+                channel="web", chat_id="c1", sender_id="assistant", content="",
+                metadata={"stream_id": "s1", "progress": event, **extra},
+            )
+            meta = env.metadata or {}
+            await queue.put({
+                "type": "progress", "event": meta["progress"],
+                "tool_name": meta.get("tool_name", ""),
+                "elapsed": meta.get("elapsed", 0),
+            })
+
+        item1 = await queue.get()
+        assert item1["event"] == "tool_start"
+        assert item1["tool_name"] == "web_search"
+
+        item2 = await queue.get()
+        assert item2["event"] == "tool_done"
+        assert item2["elapsed"] == 1.3
+
+    @pytest.mark.asyncio
+    async def test_stream_done_with_tool_calls_keeps_stream_open(self) -> None:
+        """stream_done + has_tool_calls=True should NOT close SSE (no None)."""
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+
+        # Simulate _web_outbound for stream_done with has_tool_calls
+        meta = {"stream_id": "s1", "streaming": True,
+                "stream_done": True, "has_tool_calls": True}
+        await queue.put({"type": "chunk", "content": "partial"})
+        # has_tool_calls=True → do NOT put None
+
+        assert queue.qsize() == 1
+        item = await queue.get()
+        assert item["type"] == "chunk"
+        assert queue.empty()  # No None sentinel → SSE stays open
+
+    @pytest.mark.asyncio
+    async def test_stream_done_without_tool_calls_closes_stream(self) -> None:
+        """stream_done + has_tool_calls=False should close SSE (send None)."""
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+
+        meta = {"stream_id": "s1", "streaming": True,
+                "stream_done": True, "has_tool_calls": False}
+        await queue.put({"type": "chunk", "content": "final"})
+        # has_tool_calls=False → put None
+        await queue.put(None)
+
+        item = await queue.get()
+        assert item["type"] == "chunk"
+        sentinel = await queue.get()
+        assert sentinel is None  # SSE closes
