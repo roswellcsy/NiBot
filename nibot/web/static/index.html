@@ -413,7 +413,7 @@ function dashboard(){return{
             this.chatProgress=data.tool_name+' done ('+data.elapsed+'s)';
           }
         }else if(data.type==='chunk'){
-          this.chatStreamContent+=data.content||'';
+          this.chatStreamContent=data.content||'';
         }else if(data.type==='done'){
           this.chatStreamContent=data.content||'';
         }
