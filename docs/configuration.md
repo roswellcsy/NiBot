@@ -168,6 +168,8 @@ External MCP servers can be connected as NiBot tools:
 
 ## Sub-Agent Types
 
+Built-in agent types: `coder`, `researcher`, `reviewer`, `tester`, `system`, `evolution`.
+
 Override default sub-agent configurations:
 
 ```json
@@ -175,9 +177,23 @@ Override default sub-agent configurations:
   "agents": {
     "coder": {
       "tools": ["file_read", "write_file", "edit_file", "exec", "git"],
+      "model": "openai/gpt-5.3-codex",
+      "provider": "openai",
       "maxIterations": 25,
-      "workspaceMode": "worktree",
-      "provider": "openai"
+      "workspaceMode": "worktree"
+    },
+    "reviewer": {
+      "tools": ["file_read", "list_dir", "code_review", "git"],
+      "model": "openai/gpt-5.3-codex",
+      "provider": "openai",
+      "maxIterations": 15
+    },
+    "tester": {
+      "tools": ["file_read", "write_file", "edit_file", "exec", "test_runner"],
+      "model": "openai/gpt-5.3-codex",
+      "provider": "openai",
+      "maxIterations": 20,
+      "workspaceMode": "worktree"
     },
     "researcher": {
       "tools": ["web_search", "web_fetch", "file_read"],
@@ -186,3 +202,15 @@ Override default sub-agent configurations:
   }
 }
 ```
+
+Each agent type supports these fields:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `tools` | (varies) | Tool whitelist for this agent type |
+| `model` | `""` | LiteLLM model override (empty = use main model) |
+| `provider` | `""` | Named provider to use (empty = default) |
+| `maxIterations` | `15` | Max tool-calling iterations |
+| `workspaceMode` | `""` | `"worktree"` for isolated git worktree |
+| `systemPrompt` | `""` | Custom system prompt |
+| `fallbackChain` | `[]` | Provider names to try in order on failure |

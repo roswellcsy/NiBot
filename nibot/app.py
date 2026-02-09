@@ -299,6 +299,7 @@ class NiBot:
         from nibot.tools.message_tool import MessageTool
         from nibot.tools.pipeline_tool import PipelineTool
         from nibot.tools.scaffold_tool import ScaffoldTool
+        from nibot.tools.skill_runner import SkillRunnerTool
         from nibot.tools.spawn_tool import DelegateTool
         from nibot.tools.test_runner_tool import TestRunnerTool
         from nibot.tools.web_tools import WebFetchTool, WebSearchTool
@@ -310,7 +311,9 @@ class NiBot:
             WriteFileTool(ws, restrict=restrict),
             EditFileTool(ws, restrict=restrict),
             ListDirTool(ws, restrict=restrict),
-            ExecTool(ws, timeout=self.config.tools.exec_timeout),
+            ExecTool(ws, timeout=self.config.tools.exec_timeout,
+                    sandbox_enabled=self.config.tools.sandbox_enabled,
+                    sandbox_memory_mb=self.config.tools.sandbox_memory_mb),
             WebSearchTool(api_key=self.config.tools.web_search_api_key),
             WebFetchTool(),
             MessageTool(self.bus),
@@ -323,6 +326,8 @@ class NiBot:
             ConfigTool(self.config, ws),
             ScheduleTool(self.scheduler, self.config, ws, config_path=self._config_path),
             SkillTool(self.skills, marketplace=self.marketplace),
+            SkillRunnerTool(self.skills, ws, timeout=self.config.tools.exec_timeout,
+                           sandbox_enabled=self.config.tools.sandbox_enabled),
             PipelineTool(self.pipeline_engine),
             ScaffoldTool(ws),
         ]:

@@ -1,13 +1,13 @@
-"""Shell execution tool with safety guardrails."""
+"""Shell execution tool with safety guardrails and optional sandboxing."""
 
 from __future__ import annotations
 
-import asyncio
 import re
 from pathlib import Path
 from typing import Any
 
 from nibot.registry import Tool
+from nibot.sandbox import SandboxConfig, sandboxed_exec
 
 DANGEROUS_PATTERNS = [
     r"\brm\s+(-\w*r\w*f|--force|-rf|-fr)\b",
@@ -23,9 +23,12 @@ DANGEROUS_PATTERNS = [
 
 
 class ExecTool(Tool):
-    def __init__(self, workspace: Path, timeout: int = 60) -> None:
+    def __init__(self, workspace: Path, timeout: int = 60,
+                 sandbox_enabled: bool = True, sandbox_memory_mb: int = 512) -> None:
         self._workspace = workspace
         self._timeout = timeout
+        self._sandbox_enabled = sandbox_enabled
+        self._sandbox_memory_mb = sandbox_memory_mb
 
     @property
     def name(self) -> str:
@@ -54,29 +57,20 @@ class ExecTool(Tool):
             if re.search(pattern, command):
                 return f"Blocked: command matches dangerous pattern ({pattern})"
 
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self._workspace),
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
-            return f"Command timed out after {timeout}s"
-        except Exception as e:
-            return f"Exec error: {e}"
+        cfg = SandboxConfig(
+            timeout=timeout,
+            memory_mb=self._sandbox_memory_mb,
+            enabled=self._sandbox_enabled,
+        )
+        out, err, rc = await sandboxed_exec(command, self._workspace, cfg)
 
-        out = stdout.decode("utf-8", errors="replace").strip()
-        err = stderr.decode("utf-8", errors="replace").strip()
+        if rc == -1 and ("Timed out" in err or "Exec error" in err):
+            return err
+
         parts = []
         if out:
             parts.append(out)
         if err:
             parts.append(f"[stderr]\n{err}")
-        parts.append(f"[exit={proc.returncode}]")
-        result = "\n".join(parts)
-        if len(result) > 50000:
-            result = result[:50000] + "\n... (truncated)"
-        return result
+        parts.append(f"[exit={rc}]")
+        return "\n".join(parts)

@@ -18,17 +18,34 @@ h1{font-size:24px;margin-bottom:20px;color:#1a1a1a}
 .badge-ok{background:#e6f4ea;color:#1e7e34}
 .badge-warn{background:#fff3cd;color:#856404}
 .badge-error{background:#f8d7da;color:#721c24}
+.badge-exec{background:#e8eaf6;color:#303f9f}
 table{width:100%;border-collapse:collapse;margin-top:12px}
 th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #eee;font-size:14px}
 th{color:#666;font-weight:600;font-size:12px;text-transform:uppercase}
+tr.clickable{cursor:pointer}
+tr.clickable:hover{background:#f8f9fa}
 .btn{padding:6px 16px;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600}
+.btn-sm{padding:3px 10px;font-size:12px}
 .btn-primary{background:#0066cc;color:#fff}
 .btn-danger{background:#dc3545;color:#fff}
+.btn-secondary{background:#6c757d;color:#fff}
 .btn:hover{opacity:.85}
-nav{display:flex;gap:12px;margin-bottom:24px}
+nav{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
 nav a{padding:8px 16px;background:#fff;border-radius:6px;text-decoration:none;color:#333;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 nav a.active{background:#0066cc;color:#fff}
 .loading{color:#999;font-style:italic}
+.messages-panel{margin-top:8px;padding:12px;background:#f8f9fa;border-radius:6px;max-height:400px;overflow-y:auto}
+.msg{padding:8px;margin-bottom:6px;border-radius:4px;font-size:13px;line-height:1.5}
+.msg-user{background:#e3f2fd;border-left:3px solid #1976d2}
+.msg-assistant{background:#f3e5f5;border-left:3px solid #7b1fa2}
+.msg-tool,.msg-system{background:#e8f5e9;border-left:3px solid #388e3c}
+.msg-role{font-weight:600;font-size:11px;text-transform:uppercase;color:#666;margin-bottom:2px}
+.msg-content{white-space:pre-wrap;word-break:break-word}
+.config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px}
+.config-item{padding:12px;background:#f8f9fa;border-radius:6px}
+.config-item .key{font-size:12px;color:#666;font-weight:600;text-transform:uppercase}
+.config-item .value{font-size:16px;font-weight:600;margin-top:4px}
+.toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
 </head>
@@ -41,6 +58,7 @@ nav a.active{background:#0066cc;color:#fff}
     <a href="#" :class="{'active': tab==='sessions'}" @click.prevent="tab='sessions';loadSessions()">Sessions</a>
     <a href="#" :class="{'active': tab==='skills'}" @click.prevent="tab='skills';loadSkills()">Skills</a>
     <a href="#" :class="{'active': tab==='tasks'}" @click.prevent="tab='tasks';loadTasks()">Tasks</a>
+    <a href="#" :class="{'active': tab==='config'}" @click.prevent="tab='config';loadConfig()">Config</a>
   </nav>
 
   <!-- Overview -->
@@ -87,7 +105,18 @@ nav a.active{background:#0066cc;color:#fff}
         <tr><th>Key</th><th>Messages</th><th>Tools</th><th>Errors</th><th>Updated</th></tr>
         <template x-for="s in sessions" :key="s.key">
           <tr>
-            <td x-text="s.key"></td>
+            <td>
+              <a href="#" @click.prevent="toggleMessages(s.key)" x-text="s.key" style="color:#0066cc;text-decoration:none"></a>
+              <div x-show="expandedSession===s.key" class="messages-panel">
+                <template x-for="m in sessionMessages" :key="m.timestamp">
+                  <div class="msg" :class="'msg-'+m.role">
+                    <div class="msg-role" x-text="m.role"></div>
+                    <div class="msg-content" x-text="m.content"></div>
+                  </div>
+                </template>
+                <p x-show="sessionMessages.length===0" class="loading">No messages</p>
+              </div>
+            </td>
             <td x-text="s.messages"></td>
             <td x-text="s.tool_calls"></td>
             <td x-text="s.errors"></td>
@@ -101,15 +130,20 @@ nav a.active{background:#0066cc;color:#fff}
   <!-- Skills -->
   <div x-show="tab==='skills'">
     <div class="card">
-      <h2>Skills</h2>
+      <div class="toolbar">
+        <h2 style="margin-bottom:0">Skills</h2>
+        <button class="btn btn-sm btn-secondary" @click="reloadSkills()">Reload All</button>
+      </div>
       <table>
-        <tr><th>Name</th><th>Description</th><th>Version</th><th>Always</th></tr>
+        <tr><th>Name</th><th>Description</th><th>Version</th><th>Type</th><th>Always</th><th>Actions</th></tr>
         <template x-for="s in skills" :key="s.name">
           <tr>
             <td x-text="s.name"></td>
             <td x-text="s.description"></td>
             <td x-text="'v'+s.version"></td>
+            <td><span class="badge" :class="s.executable?'badge-exec':'badge-ok'" x-text="s.executable?'Executable':'Guidance'"></span></td>
             <td x-text="s.always?'Yes':'No'"></td>
+            <td><button class="btn btn-sm btn-danger" @click="deleteSkill(s.name)">Delete</button></td>
           </tr>
         </template>
       </table>
@@ -136,24 +170,87 @@ nav a.active{background:#0066cc;color:#fff}
       <p x-show="tasks.length===0" class="loading">No tasks</p>
     </div>
   </div>
+
+  <!-- Config -->
+  <div x-show="tab==='config'">
+    <div class="card">
+      <h2>Agent Configuration</h2>
+      <div class="config-grid">
+        <div class="config-item">
+          <div class="key">Model</div>
+          <div class="value" x-text="config.agent?.model||'...'"></div>
+        </div>
+        <div class="config-item">
+          <div class="key">Temperature</div>
+          <div class="value" x-text="config.agent?.temperature||'...'"></div>
+        </div>
+        <div class="config-item">
+          <div class="key">Max Tokens</div>
+          <div class="value" x-text="config.agent?.max_tokens||'...'"></div>
+        </div>
+        <div class="config-item">
+          <div class="key">Max Iterations</div>
+          <div class="value" x-text="config.agent?.max_iterations||'...'"></div>
+        </div>
+        <div class="config-item">
+          <div class="key">Sandbox</div>
+          <div class="value" x-text="config.tools?.sandbox_enabled?'Enabled':'Disabled'"></div>
+        </div>
+        <div class="config-item">
+          <div class="key">Exec Timeout</div>
+          <div class="value" x-text="(config.tools?.exec_timeout||60)+'s'"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px" x-show="config.agents && Object.keys(config.agents).length>0">
+      <h2>Sub-Agent Types</h2>
+      <table>
+        <tr><th>Type</th><th>Model</th><th>Tools</th></tr>
+        <template x-for="[name,cfg] in Object.entries(config.agents||{})" :key="name">
+          <tr>
+            <td x-text="name"></td>
+            <td x-text="cfg.model||'(default)'"></td>
+            <td x-text="(cfg.tools||[]).join(', ')"></td>
+          </tr>
+        </template>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
 function dashboard(){return{
-  tab:'overview',health:{},analytics:{},sessions:[],skills:[],tasks:[],
+  tab:'overview',health:{},analytics:{},sessions:[],skills:[],tasks:[],config:{},
+  expandedSession:'',sessionMessages:[],
   async init(){
     await this.loadHealth();
     await this.loadAnalytics();
     setInterval(()=>this.loadHealth(),10000);
   },
-  async api(path){
-    try{const r=await fetch('/api/'+path);return await r.json()}catch(e){return{}}
+  async api(path,opts){
+    try{const r=await fetch('/api/'+path,opts);return await r.json()}catch(e){return{}}
   },
   async loadHealth(){this.health=await this.api('health')},
   async loadAnalytics(){this.analytics=await this.api('analytics')},
-  async loadSessions(){const d=await this.api('sessions');this.sessions=d.sessions||[]},
+  async loadSessions(){const d=await this.api('sessions');this.sessions=d.sessions||[];this.expandedSession='';this.sessionMessages=[]},
   async loadSkills(){const d=await this.api('skills');this.skills=d.skills||[]},
   async loadTasks(){const d=await this.api('tasks');this.tasks=d.tasks||[]},
+  async loadConfig(){this.config=await this.api('config')},
+  async toggleMessages(key){
+    if(this.expandedSession===key){this.expandedSession='';this.sessionMessages=[];return}
+    this.expandedSession=key;
+    const d=await this.api('sessions/messages?key='+encodeURIComponent(key));
+    this.sessionMessages=d.messages||[];
+  },
+  async deleteSkill(name){
+    if(!confirm('Delete skill "'+name+'"?'))return;
+    await this.api('skills',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    await this.loadSkills();
+  },
+  async reloadSkills(){
+    await this.api('skills/reload',{method:'POST'});
+    await this.loadSkills();
+  },
 }}
 </script>
 </body>

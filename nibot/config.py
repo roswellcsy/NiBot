@@ -38,6 +38,11 @@ class ScheduledJob(BaseModel):
 MODEL_PROVIDER_PREFIXES: dict[str, str] = {
     "anthropic": "anthropic",
     "claude": "anthropic",
+    "openai": "openai",
+    "gpt": "openai",
+    "o1": "openai",
+    "o3": "openai",
+    "o4": "openai",
     "deepseek": "deepseek",
     "openrouter": "openrouter",
     "gemini": "gemini",
@@ -64,6 +69,23 @@ DEFAULT_AGENT_TYPES: dict[str, AgentTypeConfig] = {
     "system": AgentTypeConfig(
         tools=["exec", "file_read", "list_dir"],
         max_iterations=10,
+    ),
+    "reviewer": AgentTypeConfig(
+        tools=["file_read", "list_dir", "code_review", "git"],
+        max_iterations=15,
+        system_prompt=(
+            "You are a code reviewer. Read the diff, check for bugs, "
+            "style issues, and security concerns. Be specific and actionable."
+        ),
+    ),
+    "tester": AgentTypeConfig(
+        tools=["file_read", "write_file", "edit_file", "list_dir", "exec", "test_runner"],
+        max_iterations=20,
+        workspace_mode="worktree",
+        system_prompt=(
+            "You are a testing agent. Write and run tests for the given code. "
+            "Use test_runner to execute. Verify edge cases."
+        ),
     ),
     "evolution": AgentTypeConfig(
         tools=["file_read", "write_file", "edit_file", "list_dir", "exec", "skill", "analyze"],
@@ -184,6 +206,8 @@ class ToolsConfig(BaseModel):
     image_model: str = ""
     mcp_servers: dict[str, "MCPServerConfig"] = Field(default_factory=dict)
     pipeline_max_parallel: int = 5
+    sandbox_enabled: bool = True
+    sandbox_memory_mb: int = 512
 
 
 class MCPServerConfig(BaseModel):

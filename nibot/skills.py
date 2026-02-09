@@ -86,6 +86,7 @@ class SkillsLoader:
             except (ValueError, AttributeError):
                 pass
         requires = nanobot_meta.get("requires", {})
+        has_run_py = (path.parent / "run.py").exists()
         return SkillSpec(
             name=meta.get("name", path.parent.name),
             description=meta.get("description", ""),
@@ -97,6 +98,7 @@ class SkillsLoader:
             created_at=self._to_str(meta.get("created_at", "")),
             created_by=str(meta.get("created_by", "")),
             version=int(meta.get("version", 1)),
+            executable=has_run_py,
         )
 
     @staticmethod

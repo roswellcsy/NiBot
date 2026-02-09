@@ -258,12 +258,31 @@ class SkillTool(Tool):
             return await self._install_skill(kwargs.get("url", ""), kwargs.get("name", ""))
         return f"Unknown action: {action}"
 
+    _RUN_PY_TEMPLATE = '''\
+#!/usr/bin/env python3
+"""{description}"""
+import json
+import sys
+
+
+def main() -> None:
+    args = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {{}}
+    # TODO: implement skill logic
+    result = {{"status": "ok", "message": "not implemented"}}
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
     def _create_skill(self, kwargs: dict[str, Any]) -> str:
         from datetime import datetime as _dt
 
         name = kwargs.get("name", "")
         desc = kwargs.get("description", "")
         body = kwargs.get("body", "")
+        executable = kwargs.get("executable", False)
         if not name or not body:
             return "Error: 'name' and 'body' are required for create."
         if not self._skills.skills_dirs:
@@ -278,8 +297,16 @@ class SkillTool(Tool):
             f"---\n\n{body}"
         )
         (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+        if executable:
+            run_py = skill_dir / "run.py"
+            if not run_py.exists():
+                run_py.write_text(
+                    self._RUN_PY_TEMPLATE.format(description=desc or name),
+                    encoding="utf-8",
+                )
         self._skills.reload()
-        return f"Skill '{name}' created and loaded. (created_at={created_at})"
+        suffix = " (executable)" if executable else ""
+        return f"Skill '{name}' created and loaded{suffix}. (created_at={created_at})"
 
     def _find_skill_dir(self, name: str) -> Path | None:
         for d in self._skills.skills_dirs:

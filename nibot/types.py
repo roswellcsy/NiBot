@@ -78,3 +78,4 @@ class SkillSpec:
     created_at: str = ""
     created_by: str = ""
     version: int = 1
+    executable: bool = False

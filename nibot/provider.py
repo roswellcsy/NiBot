@@ -75,6 +75,11 @@ class LiteLLMProvider(LLMProvider):
     _ENV_KEY_MAP: dict[str, str] = {
         "anthropic": "ANTHROPIC_API_KEY",
         "claude": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "gpt": "OPENAI_API_KEY",
+        "o1": "OPENAI_API_KEY",
+        "o3": "OPENAI_API_KEY",
+        "o4": "OPENAI_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY",
     }
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 
 async def handle_route(
@@ -11,30 +12,42 @@ async def handle_route(
 ) -> dict[str, Any] | bytes:
     """Route dispatcher. Returns dict (JSON) or bytes (static file)."""
 
+    # Parse query string
+    parsed = urlparse(path)
+    clean_path = parsed.path
+    query = parse_qs(parsed.query)
+
     # Static files
-    if path == "/" or path == "/index.html":
+    if clean_path == "/" or clean_path == "/index.html":
         index = static_dir / "index.html"
         if index.exists():
             return index.read_bytes()
         return {"error": "dashboard not found"}
 
     # API routes
-    if path == "/api/health":
+    if clean_path == "/api/health":
         return _health(app)
-    if path == "/api/sessions":
+    if clean_path == "/api/sessions":
         return _sessions(app)
-    if path == "/api/skills":
+    if clean_path == "/api/sessions/messages":
+        key = query.get("key", [""])[0]
+        limit = int(query.get("limit", ["50"])[0])
+        return _session_messages(app, key, limit)
+    if clean_path == "/api/skills":
         if method == "GET":
             return _skills_list(app)
         if method == "DELETE":
             data = json.loads(body) if body else {}
             return await _skills_delete(app, data.get("name", ""))
-    if path == "/api/config":
+    if clean_path == "/api/skills/reload":
+        if method == "POST":
+            return _skills_reload(app)
+    if clean_path == "/api/config":
         if method == "GET":
             return _config_get(app)
-    if path == "/api/analytics":
+    if clean_path == "/api/analytics":
         return _analytics(app)
-    if path == "/api/tasks":
+    if clean_path == "/api/tasks":
         return _tasks(app)
 
     return {"error": "not found", "status": 404}
@@ -56,6 +69,24 @@ def _sessions(app: Any) -> dict[str, Any]:
     return {"sessions": sessions, "total": len(sessions)}
 
 
+def _session_messages(app: Any, key: str, limit: int = 50) -> dict[str, Any]:
+    if not key:
+        return {"error": "key parameter required"}
+    messages = app.sessions.get_session_messages(key, limit=limit)
+    return {
+        "key": key,
+        "messages": [
+            {
+                "role": m.get("role", ""),
+                "content": (m.get("content") or "")[:2000],
+                "timestamp": m.get("timestamp", ""),
+            }
+            for m in messages
+        ],
+        "total": len(messages),
+    }
+
+
 def _skills_list(app: Any) -> dict[str, Any]:
     skills = app.skills.get_all()
     return {
@@ -66,6 +97,7 @@ def _skills_list(app: Any) -> dict[str, Any]:
                 "always": s.always,
                 "version": s.version,
                 "created_by": s.created_by,
+                "executable": s.executable,
             }
             for s in skills
         ]
@@ -87,6 +119,11 @@ async def _skills_delete(app: Any, name: str) -> dict[str, Any]:
     return {"error": f"skill '{name}' not found"}
 
 
+def _skills_reload(app: Any) -> dict[str, Any]:
+    app.skills.reload()
+    return {"status": "reloaded", "count": len(app.skills.get_all())}
+
+
 def _config_get(app: Any) -> dict[str, Any]:
     return {
         "agent": {
@@ -96,6 +133,11 @@ def _config_get(app: Any) -> dict[str, Any]:
             "max_iterations": app.config.agent.max_iterations,
         },
         "agents": {k: {"tools": v.tools, "model": v.model} for k, v in (app.config.agents or {}).items()},
+        "tools": {
+            "sandbox_enabled": app.config.tools.sandbox_enabled,
+            "sandbox_memory_mb": app.config.tools.sandbox_memory_mb,
+            "exec_timeout": app.config.tools.exec_timeout,
+        },
     }
 
 
