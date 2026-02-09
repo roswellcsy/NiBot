@@ -214,12 +214,16 @@ async def _chat_send(app: Any, body: bytes) -> dict[str, Any]:
         metadata={"stream_id": stream_id},
     ))
 
-    # Auto-cleanup after 5 minutes
+    # Fallback cleanup if SSE never connects
     async def _cleanup() -> None:
-        await asyncio.sleep(300.0)
+        await asyncio.sleep(60.0)
         streams.pop(stream_id, None)
 
-    asyncio.create_task(_cleanup())
+    cleanup_task = asyncio.create_task(_cleanup())
+    cleanups: dict[str, asyncio.Task[None]] = getattr(app, "_web_stream_cleanups", {})
+    if not hasattr(app, "_web_stream_cleanups"):
+        app._web_stream_cleanups = cleanups
+    cleanups[stream_id] = cleanup_task
 
     return {"stream_id": stream_id, "chat_id": chat_id}
 
@@ -262,6 +266,11 @@ def _chat_stream(app: Any, stream_id: str) -> Any:
             logger.info(f"SSE {stream_id} closed: client disconnected ({e})")
         finally:
             streams.pop(stream_id, None)
+            # Cancel fallback cleanup timer
+            cleanups: dict[str, asyncio.Task[None]] = getattr(app, "_web_stream_cleanups", {})
+            task = cleanups.pop(stream_id, None)
+            if task and not task.done():
+                task.cancel()
             writer.close()
             try:
                 await writer.wait_closed()

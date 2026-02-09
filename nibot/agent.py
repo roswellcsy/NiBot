@@ -157,7 +157,7 @@ class AgentLoop:
 
                 if can_stream:
                     response = None
-                    chunks: list[str] = []
+                    full_text = ""
                     acc = ""
                     # Strip response_key to prevent API waiter from resolving on chunks
                     stream_meta = {
@@ -170,14 +170,14 @@ class AgentLoop:
                         if isinstance(item, LLMResponse):
                             response = item
                         elif isinstance(item, str):
-                            chunks.append(item)
+                            full_text += item
                             acc += item
                             if len(acc) >= 30:
                                 await self.bus.publish_outbound(Envelope(
                                     channel=envelope.channel,
                                     chat_id=envelope.chat_id,
                                     sender_id="assistant",
-                                    content="".join(chunks),
+                                    content=full_text,
                                     metadata={
                                         **stream_meta,
                                         "streaming": True,
@@ -192,7 +192,7 @@ class AgentLoop:
                             channel=envelope.channel,
                             chat_id=envelope.chat_id,
                             sender_id="assistant",
-                            content="".join(chunks),
+                            content=full_text,
                             metadata={
                                 **stream_meta,
                                 "streaming": True,
@@ -205,11 +205,11 @@ class AgentLoop:
                         ))
                         stream_seq += 1
                     if response is None:
-                        response = LLMResponse(content="".join(chunks))
+                        response = LLMResponse(content=full_text)
                     if response.usage:
                         total_tokens += response.usage.get("total_tokens", 0)
                     if not response.has_tool_calls:
-                        final_content = response.content or "".join(chunks) or ""
+                        final_content = response.content or full_text or ""
                         break
                 else:
                     if self._fallback_chain and self._provider_pool:

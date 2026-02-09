@@ -419,3 +419,32 @@ class TestProgressEvents:
         assert item["type"] == "chunk"
         sentinel = await queue.get()
         assert sentinel is None  # SSE closes
+
+
+# ---- SSE cleanup tests ----
+
+
+class TestSSECleanup:
+
+    @pytest.mark.asyncio
+    async def test_chat_send_registers_cleanup_task(self, tmp_path: Path) -> None:
+        """_chat_send should register a cancellable cleanup task."""
+        app = _app()
+        body = json.dumps({"content": "test"}).encode()
+        result = await handle_route(app, "POST", "/api/chat/send", body, tmp_path)
+        stream_id = result["stream_id"]
+        cleanups = getattr(app, "_web_stream_cleanups", {})
+        assert stream_id in cleanups
+        task = cleanups[stream_id]
+        assert not task.done()
+        # Clean up
+        task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_timeout_is_60s(self, tmp_path: Path) -> None:
+        """Cleanup fallback timer should be 60s, not 300s."""
+        import inspect
+        from nibot.web.routes import _chat_send
+        source = inspect.getsource(_chat_send)
+        assert "60.0" in source or "60" in source
+        assert "300" not in source

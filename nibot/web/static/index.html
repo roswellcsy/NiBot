@@ -41,7 +41,15 @@ nav a.active{background:#0066cc;color:#fff}
 .msg-assistant{background:#f3e5f5;border-left:3px solid #7b1fa2}
 .msg-tool,.msg-system{background:#e8f5e9;border-left:3px solid #388e3c}
 .msg-role{font-weight:600;font-size:11px;text-transform:uppercase;color:#666;margin-bottom:2px}
-.msg-content{white-space:pre-wrap;word-break:break-word}
+.msg-content{word-break:break-word}
+.msg-content pre{background:#f6f8fa;padding:12px;border-radius:6px;overflow-x:auto;margin:8px 0}
+.msg-content code{font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:13px}
+.msg-content :not(pre)>code{background:#f0f0f0;padding:2px 6px;border-radius:3px}
+.msg-content p{margin:4px 0}
+.msg-content ul,.msg-content ol{padding-left:20px;margin:4px 0}
+.msg-content table{border-collapse:collapse;margin:8px 0}
+.msg-content th,.msg-content td{border:1px solid #ddd;padding:6px 10px;font-size:13px}
+.msg-content blockquote{border-left:3px solid #ddd;padding-left:12px;color:#666;margin:4px 0}
 .config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px}
 .config-item{padding:12px;background:#f8f9fa;border-radius:6px}
 .config-item .key{font-size:12px;color:#666;font-weight:600;text-transform:uppercase}
@@ -62,6 +70,9 @@ nav a.active{background:#0066cc;color:#fff}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 @media(max-width:768px){.chat-sidebar{display:none}}
 </style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
 </head>
 <body>
@@ -114,12 +125,12 @@ nav a.active{background:#0066cc;color:#fff}
         <template x-for="(m,i) in chatMessages" :key="i">
           <div class="msg" :class="'msg-'+m.role">
             <div class="msg-role" x-text="m.role"></div>
-            <div class="msg-content" x-text="m.content"></div>
+            <div class="msg-content" x-html="renderMd(m.content)"></div>
           </div>
         </template>
         <div x-show="chatStreamContent" class="msg msg-assistant">
           <div class="msg-role">assistant</div>
-          <div class="msg-content" x-text="chatStreamContent"></div>
+          <div class="msg-content" x-html="renderMd(chatStreamContent)"></div>
         </div>
         <div x-show="chatLoading && !chatStreamContent" class="chat-progress">
           <span class="progress-dot"></span>
@@ -187,7 +198,7 @@ nav a.active{background:#0066cc;color:#fff}
                 <template x-for="m in sessionMessages" :key="m.timestamp">
                   <div class="msg" :class="'msg-'+m.role">
                     <div class="msg-role" x-text="m.role"></div>
-                    <div class="msg-content" x-text="m.content"></div>
+                    <div class="msg-content" x-html="renderMd(m.content)"></div>
                   </div>
                 </template>
                 <p x-show="sessionMessages.length===0" class="loading">No messages</p>
@@ -301,12 +312,26 @@ function dashboard(){return{
   chatSessions:[],currentChatId:'',chatMessages:[],chatInput:'',chatLoading:false,chatStreamContent:'',chatProgress:'',
   authToken:'',showTokenPrompt:false,
   async init(){
+    if(typeof marked!=='undefined'){
+      marked.setOptions({breaks:true,gfm:true});
+    }
     this.authToken=localStorage.getItem('nibot_token')||new URLSearchParams(location.search).get('token')||'';
     if(!this.authToken){this.showTokenPrompt=true;return}
     await this.loadHealth();
     await this.loadAnalytics();
     this.loadChatSessions();
     setInterval(()=>this.loadHealth(),10000);
+  },
+  renderMd(text){
+    if(!text)return'';
+    try{
+      if(typeof marked!=='undefined'){
+        const html=marked.parse(text);
+        this.$nextTick(()=>{if(typeof hljs!=='undefined')document.querySelectorAll('.msg-content pre code:not(.hljs)').forEach(el=>hljs.highlightElement(el))});
+        return html;
+      }
+    }catch(e){}
+    return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
   },
   saveToken(){
     this.authToken=this.authToken.trim();
