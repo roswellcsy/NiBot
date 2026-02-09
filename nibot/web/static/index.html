@@ -322,7 +322,7 @@ function dashboard(){return{
       const r=await fetch('/api/'+path,opts);
       if(r.status===401){this.showTokenPrompt=true;return{}}
       return await r.json();
-    }catch(e){return{}}
+    }catch(e){return{error:e.message||'Network error'}}
   },
   async loadHealth(){this.health=await this.api('health')},
   async loadAnalytics(){this.analytics=await this.api('analytics')},
