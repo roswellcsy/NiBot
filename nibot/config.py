@@ -128,6 +128,7 @@ class AgentConfig(BaseModel):
     auto_evolution: bool = False
     provider_fallback_chain: list[str] = Field(default_factory=list)
     streaming: bool = True
+    streaming_chunk_size: int = 30
 
 
 class TelegramChannelConfig(BaseModel):
@@ -255,6 +256,7 @@ class WebPanelConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 9200
     auth_token: str = ""
+    rate_limit_rpm: int = 0
 
 
 class LogConfig(BaseModel):
@@ -394,6 +396,9 @@ def validate_startup(config: NiBotConfig) -> None:
     if config.channels.wecom.enabled:
         if not config.channels.wecom.corp_id or not config.channels.wecom.secret:
             errors.append("channels.wecom.enabled=true but corp_id/secret missing")
+
+    if config.channels.vault.enabled and not config.channels.vault.watch_dir:
+        errors.append("channels.vault.enabled=true but watch_dir is empty")
 
     # 3. Cron expressions must parse
     from croniter import croniter

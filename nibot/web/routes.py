@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import uuid
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ from urllib.parse import parse_qs, urlparse
 
 from nibot.log import logger
 from nibot.types import Envelope
+
+_MAX_CONCURRENT_STREAMS = 50
 
 
 async def handle_route(
@@ -40,7 +43,8 @@ async def handle_route(
     if clean_path == "/api/chat/history":
         chat_id = query.get("chat_id", [""])[0]
         limit = int(query.get("limit", ["50"])[0])
-        return _chat_history(app, chat_id, limit)
+        secret = query.get("secret", [""])[0]
+        return _chat_history(app, chat_id, limit, secret)
 
     # Management API routes
     if clean_path == "/api/health":
@@ -211,6 +215,15 @@ async def _chat_send(app: Any, body: bytes) -> dict[str, Any]:
     streams: dict[str, asyncio.Queue[Any]] = getattr(app, "_web_streams", {})
     streams[stream_id] = queue
 
+    # Generate session secret for chat history access control
+    chat_secrets: dict[str, str] = getattr(app, "_web_chat_secrets", {})
+    if not hasattr(app, "_web_chat_secrets"):
+        app._web_chat_secrets = chat_secrets
+    session_secret = chat_secrets.get(chat_id, "")
+    if not session_secret:
+        session_secret = secrets.token_urlsafe(16)
+        chat_secrets[chat_id] = session_secret
+
     await app.bus.publish_inbound(Envelope(
         channel="web",
         chat_id=chat_id,
@@ -221,7 +234,7 @@ async def _chat_send(app: Any, body: bytes) -> dict[str, Any]:
 
     # Fallback cleanup if SSE never connects
     async def _cleanup() -> None:
-        await asyncio.sleep(60.0)
+        await asyncio.sleep(30.0)
         streams.pop(stream_id, None)
 
     cleanup_task = asyncio.create_task(_cleanup())
@@ -230,7 +243,7 @@ async def _chat_send(app: Any, body: bytes) -> dict[str, Any]:
         app._web_stream_cleanups = cleanups
     cleanups[stream_id] = cleanup_task
 
-    return {"stream_id": stream_id, "chat_id": chat_id}
+    return {"stream_id": stream_id, "chat_id": chat_id, "secret": session_secret}
 
 
 def _chat_stream(app: Any, stream_id: str) -> Any:
@@ -241,6 +254,8 @@ def _chat_stream(app: Any, stream_id: str) -> Any:
         return {"error": "id parameter required", "status": 400}
 
     streams: dict[str, asyncio.Queue[Any]] = getattr(app, "_web_streams", {})
+    if len(streams) > _MAX_CONCURRENT_STREAMS:
+        return {"error": "too many concurrent streams", "status": 503}
     queue = streams.get(stream_id)
     if not queue:
         return {"error": "stream not found", "status": 404}
@@ -292,10 +307,16 @@ def _chat_sessions(app: Any) -> dict[str, Any]:
     return {"sessions": web_sessions}
 
 
-def _chat_history(app: Any, chat_id: str, limit: int = 50) -> dict[str, Any]:
+def _chat_history(app: Any, chat_id: str, limit: int = 50,
+                  secret: str = "") -> dict[str, Any]:
     """Get message history for a web chat session."""
     if not chat_id:
         return {"error": "chat_id parameter required", "status": 400}
+    # Verify session secret
+    chat_secrets: dict[str, str] = getattr(app, "_web_chat_secrets", {})
+    expected = chat_secrets.get(chat_id, "")
+    if expected and secret != expected:
+        return {"error": "forbidden", "status": 403}
     key = f"web:{chat_id}" if not chat_id.startswith("web:") else chat_id
     messages = app.sessions.get_session_messages(key, limit=limit)
     return {

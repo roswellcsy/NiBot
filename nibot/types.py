@@ -79,3 +79,6 @@ class SkillSpec:
     created_by: str = ""
     version: int = 1
     executable: bool = False
+    usage_count: int = 0
+    success_count: int = 0
+    last_used: str = ""

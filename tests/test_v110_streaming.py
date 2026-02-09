@@ -409,3 +409,54 @@ class TestAPIStreamingChannel:
         ))
         # If it reached resolve_response, it would fail since no waiter exists
         # No error means early return worked
+
+
+class TestStreamingChunkSizeConfig:
+    """streaming_chunk_size is configurable and eliminates the magic number."""
+
+    @pytest.mark.asyncio
+    async def test_custom_chunk_size_10(self, tmp_path) -> None:
+        """With chunk_size=10, streaming publishes at 10-char boundaries."""
+        bus = MessageBus()
+        text = "X" * 25  # 25 chars: chunks at 10, 20, then stream_done at 25
+        provider = MultiChunkProvider([LLMResponse(content=text)], chunk_size=5)
+        registry = ToolRegistry()
+        sessions = SessionManager(tmp_path / "sessions")
+        config = NiBotConfig()
+        config.agent.streaming = True
+        config.agent.streaming_chunk_size = 10
+        agent = AgentLoop(
+            bus=bus, provider=provider, registry=registry,
+            sessions=sessions, context_builder=FakeContextBuilder(), config=config,
+        )
+
+        captured: list[Envelope] = []
+        bus.subscribe_outbound("test", lambda e: captured.append(e))
+
+        await bus.publish_inbound(
+            Envelope(channel="test", chat_id="c1", sender_id="user1", content="go")
+        )
+
+        agent_task = asyncio.create_task(agent.run())
+        dispatch_task = asyncio.create_task(bus.dispatch_outbound())
+        await asyncio.sleep(0.5)
+        agent.stop()
+        bus.stop()
+        agent_task.cancel()
+        dispatch_task.cancel()
+        try:
+            await asyncio.gather(agent_task, dispatch_task)
+        except asyncio.CancelledError:
+            pass
+
+        streaming = [e for e in captured if (e.metadata or {}).get("streaming")]
+        # At 10-char boundary: seq=0 (10 chars), seq=1 (20 chars), stream_done (25 chars)
+        assert len(streaming) >= 3
+        assert streaming[0].content == "X" * 10
+        assert streaming[0].metadata["stream_seq"] == 0
+        assert streaming[1].content == "X" * 20
+        assert streaming[1].metadata["stream_seq"] == 1
+
+    def test_default_chunk_size_is_30(self) -> None:
+        config = NiBotConfig()
+        assert config.agent.streaming_chunk_size == 30

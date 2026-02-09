@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from nibot.log import logger
@@ -32,6 +34,7 @@ class SkillsLoader:
                     continue
                 spec = self._parse(skill_file)
                 if spec and self._check_requirements(spec):
+                    self._load_stats(spec)
                     self._specs[spec.name] = spec
                     seen.add(skill_dir.name)
                     logger.debug(f"Loaded skill: {spec.name} (always={spec.always})")
@@ -108,6 +111,42 @@ class SkillsLoader:
         if hasattr(val, "isoformat"):
             return val.isoformat()  # type: ignore[union-attr]
         return str(val) if val else ""
+
+    def record_usage(self, name: str, success: bool) -> None:
+        """Record a skill execution. Persists stats to disk."""
+        spec = self._specs.get(name)
+        if not spec:
+            return
+        spec.usage_count += 1
+        if success:
+            spec.success_count += 1
+        spec.last_used = datetime.now().isoformat()
+        self._save_stats(spec)
+
+    def _load_stats(self, spec: SkillSpec) -> None:
+        """Load usage stats from stats.json sidecar file."""
+        stats_path = Path(spec.path).parent / "stats.json"
+        if not stats_path.exists():
+            return
+        try:
+            data = json.loads(stats_path.read_text(encoding="utf-8"))
+            spec.usage_count = data.get("usage_count", 0)
+            spec.success_count = data.get("success_count", 0)
+            spec.last_used = data.get("last_used", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    def _save_stats(self, spec: SkillSpec) -> None:
+        """Persist usage stats to stats.json next to SKILL.md."""
+        stats_path = Path(spec.path).parent / "stats.json"
+        try:
+            stats_path.write_text(json.dumps({
+                "usage_count": spec.usage_count,
+                "success_count": spec.success_count,
+                "last_used": spec.last_used,
+            }, ensure_ascii=False), encoding="utf-8")
+        except OSError as e:
+            logger.warning(f"Failed to save skill stats for {spec.name}: {e}")
 
     def _check_requirements(self, spec: SkillSpec) -> bool:
         for b in spec.requires_bins:

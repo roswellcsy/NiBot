@@ -20,6 +20,7 @@ from nibot.config import (
     ProvidersConfig,
     ScheduledJob,
     TelegramChannelConfig,
+    VaultChannelConfig,
     validate_startup,
 )
 
@@ -125,6 +126,23 @@ class TestConfigValidation:
         assert "No provider configured" in msg
         assert "telegram" in msg
         assert "log.level" in msg
+
+    def test_vault_enabled_without_watch_dir_raises(self) -> None:
+        cfg = _valid_config(
+            channels=ChannelsConfig(
+                vault=VaultChannelConfig(enabled=True, watch_dir=""),
+            ),
+        )
+        with pytest.raises(ValueError, match="vault.*watch_dir"):
+            validate_startup(cfg)
+
+    def test_vault_enabled_with_watch_dir_passes(self) -> None:
+        cfg = _valid_config(
+            channels=ChannelsConfig(
+                vault=VaultChannelConfig(enabled=True, watch_dir="/tmp/vault"),
+            ),
+        )
+        validate_startup(cfg)  # should not raise
 
     def test_nibot_config_bare_construction_still_works(self) -> None:
         """Existing test pattern: NiBotConfig() must not raise."""

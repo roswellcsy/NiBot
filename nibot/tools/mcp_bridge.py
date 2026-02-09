@@ -39,10 +39,19 @@ class _MCPToolAdapter(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         try:
+            if not self._server.is_alive():
+                logger.warning(f"MCP server dead, reconnecting for tool {self._name}")
+                await self._server.reconnect()
             result = await self._server.call_tool(self._original_name, kwargs)
             return result
         except Exception as e:
-            return f"MCP tool error: {e}"
+            # One retry after reconnect
+            try:
+                logger.warning(f"MCP tool {self._name} failed ({e}), reconnecting and retrying")
+                await self._server.reconnect()
+                return await self._server.call_tool(self._original_name, kwargs)
+            except Exception as retry_err:
+                return f"MCP tool error (after reconnect): {retry_err}"
 
 
 class MCPServerConnection:
@@ -76,6 +85,23 @@ class MCPServerConnection:
             "capabilities": {},
             "clientInfo": {"name": "nibot", "version": "1.0.0"},
         })
+
+    def is_alive(self) -> bool:
+        """Check if the MCP server process is still running."""
+        if not self._process or self._process.returncode is not None:
+            return False
+        if self._reader_task and self._reader_task.done():
+            return False
+        return True
+
+    async def reconnect(self) -> None:
+        """Tear down and re-establish the connection."""
+        try:
+            await self.disconnect()
+        except Exception:
+            pass
+        self._pending.clear()
+        await self.connect()
 
     async def disconnect(self) -> None:
         """Stop the MCP server."""
@@ -149,6 +175,7 @@ class MCPServerConnection:
             while True:
                 line = await self._process.stdout.readline()
                 if not line:
+                    logger.warning("MCP server stdout closed (process exited)")
                     break
                 try:
                     msg = json.loads(line.decode())

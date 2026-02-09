@@ -75,9 +75,11 @@ class SkillRunnerTool(Tool):
         out, err, rc = await sandboxed_exec_py(run_py, self._workspace, cfg, input_data)
 
         if rc == -1 and ("Timed out" in err or "Exec error" in err):
+            self._skills.record_usage(skill_name, success=False)
             return f"Skill '{skill_name}' {err.lower()}"
 
         if rc != 0:
+            self._skills.record_usage(skill_name, success=False)
             msg = f"Skill '{skill_name}' failed (exit={rc})"
             if err:
                 msg += f"\n[stderr]\n{err}"
@@ -85,4 +87,5 @@ class SkillRunnerTool(Tool):
                 msg += f"\n[stdout]\n{out}"
             return msg
 
+        self._skills.record_usage(skill_name, success=True)
         return out if out else "(no output)"

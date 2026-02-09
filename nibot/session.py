@@ -65,7 +65,8 @@ class SessionManager:
             self._cache.move_to_end(key)
         self._cache[key] = session
         while len(self._cache) > self._max_cache_size:
-            self._cache.popitem(last=False)
+            _evicted_key, evicted_session = self._cache.popitem(last=False)
+            self._write_to_disk(evicted_session)
 
     def get_or_create(self, key: str) -> Session:
         if key in self._cache:
@@ -75,7 +76,8 @@ class SessionManager:
         self._cache_put(key, session)
         return session
 
-    def save(self, session: Session) -> None:
+    def _write_to_disk(self, session: Session) -> None:
+        """Persist session to JSONL file. No cache interaction."""
         path = self._path_for(session.key)
         with open(path, "w", encoding="utf-8") as f:
             meta = {
@@ -87,6 +89,9 @@ class SessionManager:
             f.write(json.dumps(meta, ensure_ascii=False) + "\n")
             for msg in session.messages:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+
+    def save(self, session: Session) -> None:
+        self._write_to_disk(session)
         self._cache_put(session.key, session)
 
     def delete(self, key: str) -> None:

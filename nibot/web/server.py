@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
@@ -31,11 +33,13 @@ class WebPanel:
     """
 
     def __init__(self, app: Any, host: str = "127.0.0.1", port: int = 9200,
-                 auth_token: str = "") -> None:
+                 auth_token: str = "", rate_limit_rpm: int = 0) -> None:
         self._app = app
         self._host = host
         self._port = port
         self._auth_token = auth_token
+        self._rate_limit_rpm = rate_limit_rpm
+        self._ip_windows: dict[str, deque[float]] = {}
         self._server: asyncio.Server | None = None
         self._static_dir = Path(__file__).parent / "static"
 
@@ -80,6 +84,19 @@ class WebPanel:
                 return
             if content_length > 0:
                 body = await asyncio.wait_for(reader.readexactly(content_length), timeout=10.0)
+
+            # Rate limiting (per-IP sliding window)
+            if self._rate_limit_rpm > 0 and path.startswith("/api/"):
+                ip = peer[0] if isinstance(peer, tuple) else str(peer)
+                now = time.monotonic()
+                window = self._ip_windows.setdefault(ip, deque())
+                cutoff = now - 60.0
+                while window and window[0] < cutoff:
+                    window.popleft()
+                if len(window) >= self._rate_limit_rpm:
+                    await self._respond(writer, {"error": "rate limit exceeded"}, status=429)
+                    return
+                window.append(now)
 
             # Auth check for API routes
             if path.startswith("/api/") and self._auth_token:
@@ -133,7 +150,9 @@ class WebPanel:
                       status: int = 200) -> None:
         payload = json.dumps(data, ensure_ascii=False)
         status_text = {200: "OK", 400: "Bad Request", 401: "Unauthorized",
-                      404: "Not Found", 500: "Error"}.get(status, "OK")
+                      403: "Forbidden", 404: "Not Found", 413: "Payload Too Large",
+                      429: "Too Many Requests", 503: "Service Unavailable",
+                      500: "Error"}.get(status, "OK")
         resp = (f"HTTP/1.1 {status} {status_text}\r\n"
                f"Content-Type: application/json\r\n"
                f"Access-Control-Allow-Origin: *\r\n"

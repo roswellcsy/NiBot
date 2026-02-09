@@ -441,10 +441,98 @@ class TestSSECleanup:
         task.cancel()
 
     @pytest.mark.asyncio
-    async def test_cleanup_timeout_is_60s(self, tmp_path: Path) -> None:
-        """Cleanup fallback timer should be 60s, not 300s."""
+    async def test_cleanup_timeout_is_30s(self, tmp_path: Path) -> None:
+        """Cleanup fallback timer should be 30s (reduced from 60s)."""
         import inspect
         from nibot.web.routes import _chat_send
         source = inspect.getsource(_chat_send)
-        assert "60.0" in source or "60" in source
-        assert "300" not in source
+        assert "30.0" in source
+        assert "60.0" not in source
+
+
+# ---- Phase 8: Chat session isolation ----
+
+
+class TestChatSessionIsolation:
+
+    @pytest.mark.asyncio
+    async def test_send_returns_secret(self, tmp_path: Path) -> None:
+        """_chat_send should return a session secret."""
+        app = _app()
+        body = json.dumps({"content": "hello"}).encode()
+        result = await handle_route(app, "POST", "/api/chat/send", body, tmp_path)
+        assert "secret" in result
+        assert len(result["secret"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_same_chat_id_returns_same_secret(self, tmp_path: Path) -> None:
+        """Multiple sends to the same chat_id should return the same secret."""
+        app = _app()
+        body1 = json.dumps({"content": "msg1", "chat_id": "sess1"}).encode()
+        body2 = json.dumps({"content": "msg2", "chat_id": "sess1"}).encode()
+        r1 = await handle_route(app, "POST", "/api/chat/send", body1, tmp_path)
+        r2 = await handle_route(app, "POST", "/api/chat/send", body2, tmp_path)
+        assert r1["secret"] == r2["secret"]
+
+    @pytest.mark.asyncio
+    async def test_history_requires_secret(self, tmp_path: Path) -> None:
+        """Chat history with wrong secret returns 403."""
+        app = _app()
+        # Send a message to create a secret
+        body = json.dumps({"content": "hi", "chat_id": "c1"}).encode()
+        result = await handle_route(app, "POST", "/api/chat/send", body, tmp_path)
+        correct_secret = result["secret"]
+
+        # Wrong secret → 403
+        r = await handle_route(
+            app, "GET", "/api/chat/history?chat_id=c1&secret=wrong", b"", tmp_path,
+        )
+        assert r.get("status") == 403
+
+        # Correct secret → success
+        r2 = await handle_route(
+            app, "GET", f"/api/chat/history?chat_id=c1&secret={correct_secret}",
+            b"", tmp_path,
+        )
+        assert "error" not in r2 or r2.get("status") != 403
+
+    @pytest.mark.asyncio
+    async def test_history_no_secret_no_restriction_for_new_chats(self, tmp_path: Path) -> None:
+        """Chat history without a registered secret should still work (no secret set)."""
+        app = _app()
+        r = await handle_route(
+            app, "GET", "/api/chat/history?chat_id=unknown_chat", b"", tmp_path,
+        )
+        # No secret registered for this chat_id → no restriction
+        assert r.get("status") != 403
+
+
+# ---- Phase 8: SSE max concurrent streams ----
+
+
+class TestSSEMaxConcurrentStreams:
+
+    @pytest.mark.asyncio
+    async def test_sse_max_concurrent_rejects_over_limit(self, tmp_path: Path) -> None:
+        """Exceeding _MAX_CONCURRENT_STREAMS returns 503."""
+        from nibot.web import routes as routes_mod
+        app = _app()
+        # Fill _web_streams beyond the limit
+        app._web_streams = {f"s{i}": asyncio.Queue() for i in range(51)}
+        result = await handle_route(
+            app, "GET", "/api/chat/stream?id=s0", b"", tmp_path,
+        )
+        assert result.get("status") == 503
+        assert "concurrent" in result.get("error", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_sse_under_limit_works(self, tmp_path: Path) -> None:
+        """Under _MAX_CONCURRENT_STREAMS, stream should work normally."""
+        app = _app()
+        app._web_streams = {f"s{i}": asyncio.Queue() for i in range(10)}
+        # Add a valid stream for lookup
+        app._web_streams["target"] = asyncio.Queue()
+        result = await handle_route(
+            app, "GET", "/api/chat/stream?id=target", b"", tmp_path,
+        )
+        assert isinstance(result, SSEResponse)

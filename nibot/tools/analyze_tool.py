@@ -184,9 +184,18 @@ class AnalyzeTool(Tool):
         agg_before = aggregate_metrics(before)
         agg_after = aggregate_metrics(after)
 
+        success_rate = (
+            spec.success_count / spec.usage_count if spec.usage_count > 0 else None
+        )
         result = {
             "skill": skill_name,
             "created_at": spec.created_at,
+            "usage": {
+                "total": spec.usage_count,
+                "success": spec.success_count,
+                "success_rate": success_rate,
+                "last_used": spec.last_used,
+            },
             "before": {
                 "sessions": agg_before.session_count,
                 "error_rate": agg_before.overall_error_rate,

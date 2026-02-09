@@ -426,6 +426,7 @@ class NiBot:
         from nibot.web.server import WebPanel
         self._web_panel = WebPanel(
             app=self, host=wp_cfg.host, port=wp_cfg.port, auth_token=wp_cfg.auth_token,
+            rate_limit_rpm=wp_cfg.rate_limit_rpm,
         )
         await self._web_panel.start()
 

@@ -50,6 +50,7 @@ class AgentLoop:
         self.max_iterations = config.agent.max_iterations
         self._gateway_tools: list[str] = config.agent.gateway_tools
         self._streaming = config.agent.streaming
+        self._stream_chunk_size = config.agent.streaming_chunk_size
         self._fallback_chain: list[str] = config.agent.provider_fallback_chain
         self._provider_pool = provider_pool
         self._evo_trigger = evo_trigger
@@ -172,7 +173,7 @@ class AgentLoop:
                         elif isinstance(item, str):
                             full_text += item
                             acc += item
-                            if len(acc) >= 30:
+                            if len(acc) >= self._stream_chunk_size:
                                 await self.bus.publish_outbound(Envelope(
                                     channel=envelope.channel,
                                     chat_id=envelope.chat_id,
