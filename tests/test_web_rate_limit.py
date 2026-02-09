@@ -73,6 +73,55 @@ async def test_web_panel_rate_limit_blocks():
 
 
 @pytest.mark.asyncio
+async def test_cors_default_no_header():
+    """Default empty cors_origin: no Access-Control-Allow-Origin in response."""
+    panel = WebPanel(_StubApp(), host="127.0.0.1", port=0, cors_origin="")
+    await panel.start()
+    port = panel._server.sockets[0].getsockname()[1]
+
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET /api/status HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        await writer.drain()
+        data = await asyncio.wait_for(reader.read(4096), timeout=5.0)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        text = data.decode("utf-8", errors="replace")
+        # Headers are between first line and \r\n\r\n
+        headers_section = text.split("\r\n\r\n", 1)[0]
+        assert "Access-Control-Allow-Origin" not in headers_section
+    finally:
+        await panel.stop()
+
+
+@pytest.mark.asyncio
+async def test_cors_custom_origin():
+    """Configured cors_origin: response includes matching CORS header."""
+    panel = WebPanel(_StubApp(), host="127.0.0.1", port=0, cors_origin="https://my.app")
+    await panel.start()
+    port = panel._server.sockets[0].getsockname()[1]
+
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET /api/status HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        await writer.drain()
+        data = await asyncio.wait_for(reader.read(4096), timeout=5.0)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        text = data.decode("utf-8", errors="replace")
+        headers_section = text.split("\r\n\r\n", 1)[0]
+        assert "Access-Control-Allow-Origin: https://my.app" in headers_section
+    finally:
+        await panel.stop()
+
+
+@pytest.mark.asyncio
 async def test_web_panel_rate_limit_zero_disables():
     """rpm=0: rate limiting disabled, all requests pass."""
     panel = WebPanel(_StubApp(), host="127.0.0.1", port=0, rate_limit_rpm=0)

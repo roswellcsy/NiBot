@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+_MEMORY_MAX_LINES = 1000
+
 
 class MemoryStore:
     """Workspace memory: MEMORY.md for persistent facts, YYYY-MM-DD.md for daily notes."""
@@ -44,8 +46,13 @@ class MemoryStore:
         self._memory_file.write_text(content, encoding="utf-8")
 
     def append_memory(self, line: str) -> None:
-        with open(self._memory_file, "a", encoding="utf-8") as f:
-            f.write(line.rstrip("\n") + "\n")
+        lines: list[str] = []
+        if self._memory_file.exists():
+            lines = self._memory_file.read_text(encoding="utf-8").splitlines()
+        lines.append(line.rstrip("\n"))
+        if len(lines) > _MEMORY_MAX_LINES:
+            lines = lines[-_MEMORY_MAX_LINES:]
+        self._memory_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def read_daily(self, date: datetime | None = None) -> str:
         path = self._daily_file(date)

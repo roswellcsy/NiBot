@@ -16,6 +16,7 @@ class AgentTypeConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     model: str = ""
     max_iterations: int = 15
+    timeout_seconds: int = 300
     system_prompt: str = ""
     provider: str = ""
     workspace_mode: str = ""
@@ -257,6 +258,7 @@ class WebPanelConfig(BaseModel):
     port: int = 9200
     auth_token: str = ""
     rate_limit_rpm: int = 0
+    cors_origin: str = ""
 
 
 class LogConfig(BaseModel):

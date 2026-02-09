@@ -45,6 +45,8 @@ class TestMCPReconnect:
         conn.disconnect = AsyncMock()
         conn.connect = AsyncMock()
         conn._pending = {1: asyncio.Future(), 2: asyncio.Future()}
+        # Must appear dead so reconnect doesn't short-circuit
+        conn._process = None
 
         await conn.reconnect()
 
@@ -57,6 +59,7 @@ class TestMCPReconnect:
         conn = MCPServerConnection("dummy")
         conn.disconnect = AsyncMock(side_effect=OSError("already dead"))
         conn.connect = AsyncMock()
+        conn._process = None  # appear dead
 
         await conn.reconnect()
 
@@ -117,3 +120,74 @@ class TestMCPAdapterRetry:
 
         conn.reconnect.assert_not_awaited()
         assert result == "ok"
+
+
+class TestMCPConcurrentReconnect:
+    """Phase 1 v1.4: verify reconnect lock prevents concurrent reconnect races."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_reconnect_only_connects_once(self):
+        """5 concurrent reconnect() calls should only trigger 1 disconnect+connect."""
+        conn = MCPServerConnection("dummy")
+        conn._process = None  # appear dead
+
+        connect_count = 0
+        original_is_alive = conn.is_alive
+
+        async def mock_connect():
+            nonlocal connect_count
+            connect_count += 1
+            # After connect, make it appear alive
+            conn._process = MagicMock()
+            conn._process.returncode = None
+            conn._reader_task = MagicMock()
+            conn._reader_task.done.return_value = False
+
+        conn.disconnect = AsyncMock()
+        conn.connect = AsyncMock(side_effect=mock_connect)
+
+        # Fire 5 concurrent reconnect calls
+        await asyncio.gather(*[conn.reconnect() for _ in range(5)])
+
+        # Only 1 should actually connect (others see is_alive()=True after first)
+        assert connect_count == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_tool_calls_during_reconnect(self):
+        """Multiple adapters calling execute concurrently on dead server all get results."""
+        conn = MCPServerConnection("dummy")
+        conn._process = None  # dead
+
+        async def mock_reconnect():
+            async with conn._reconnect_lock:
+                if conn.is_alive():
+                    return
+                await asyncio.sleep(0.01)  # simulate reconnect delay
+                conn._process = MagicMock()
+                conn._process.returncode = None
+                conn._reader_task = MagicMock()
+                conn._reader_task.done.return_value = False
+
+        conn.reconnect = mock_reconnect
+        conn.call_tool = AsyncMock(return_value="ok")
+
+        adapters = [_MCPToolAdapter(f"tool{i}", "desc", {}, conn) for i in range(3)]
+        results = await asyncio.gather(*[a.execute(x="1") for a in adapters])
+
+        assert all(r == "ok" for r in results)
+
+    @pytest.mark.asyncio
+    async def test_reconnect_skips_when_already_alive(self):
+        """reconnect() with live server is a no-op (double-check pattern)."""
+        conn = MCPServerConnection("dummy")
+        conn._process = MagicMock()
+        conn._process.returncode = None
+        conn._reader_task = MagicMock()
+        conn._reader_task.done.return_value = False
+        conn.disconnect = AsyncMock()
+        conn.connect = AsyncMock()
+
+        await conn.reconnect()
+
+        conn.disconnect.assert_not_awaited()
+        conn.connect.assert_not_awaited()

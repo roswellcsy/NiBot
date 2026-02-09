@@ -208,8 +208,11 @@ class SubagentManager:
             {"role": "system", "content": system_content},
             {"role": "user", "content": task},
         ]
+        timeout = agent_config.timeout_seconds if agent_config else 300
         final = ""
-        try:
+
+        async def _agent_loop() -> str:
+            result_text = ""
             for _ in range(max_iter):
                 if use_fallback:
                     resp = await self.provider_pool.chat_with_fallback(
@@ -221,7 +224,7 @@ class SubagentManager:
                         messages=messages, tools=tool_defs or None, model=model_override,
                     )
                 if not resp.has_tool_calls:
-                    final = resp.content or ""
+                    result_text = resp.content or ""
                     break
                 tc_dicts = [
                     {
@@ -240,6 +243,15 @@ class SubagentManager:
                         "name": tc.name,
                         "content": result.content,
                     })
+            return result_text
+
+        try:
+            final = await asyncio.wait_for(_agent_loop(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"Subagent {task_id} timed out after {timeout}s")
+            final = f"Subagent timed out after {timeout}s"
+            if task_id in self._task_info:
+                self._task_info[task_id].status = "error"
         except Exception as e:
             logger.error(f"Subagent {task_id} error: {e}")
             final = f"Subagent error: {e}"

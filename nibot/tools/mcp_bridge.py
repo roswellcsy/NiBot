@@ -66,6 +66,7 @@ class MCPServerConnection:
         self._request_id = 0
         self._pending: dict[int, asyncio.Future[Any]] = {}
         self._reader_task: asyncio.Task[None] | None = None
+        self._reconnect_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         """Start MCP server process and initialize."""
@@ -95,13 +96,16 @@ class MCPServerConnection:
         return True
 
     async def reconnect(self) -> None:
-        """Tear down and re-establish the connection."""
-        try:
-            await self.disconnect()
-        except Exception:
-            pass
-        self._pending.clear()
-        await self.connect()
+        """Tear down and re-establish the connection (serialized)."""
+        async with self._reconnect_lock:
+            if self.is_alive():
+                return  # another coroutine already reconnected
+            try:
+                await self.disconnect()
+            except Exception:
+                pass
+            self._pending.clear()
+            await self.connect()
 
     async def disconnect(self) -> None:
         """Stop the MCP server."""

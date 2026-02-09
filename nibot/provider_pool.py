@@ -260,10 +260,24 @@ class ProviderPool:
         quota = self._quotas.get(name)
         if not quota:
             return
-        error_str = str(error).lower()
-        if "429" in error_str or "rate" in error_str or "quota" in error_str:
+        if self._is_rate_limit_error(error):
             retry_after = self._parse_retry_after(error)
             quota.record_rate_limit(retry_after)
+
+    @staticmethod
+    def _is_rate_limit_error(error: Exception) -> bool:
+        """Check if error is a true rate limit (HTTP 429), avoiding false positives."""
+        # 1. LiteLLM RateLimitError type
+        if type(error).__name__ == "RateLimitError":
+            return True
+        error_str = str(error)
+        # 2. Explicit HTTP status code
+        if "status_code=429" in error_str or "status: 429" in error_str:
+            return True
+        # 3. Word-boundary 429 (avoid matching "42900" etc.)
+        if re.search(r"\b429\b", error_str):
+            return True
+        return False
 
     @staticmethod
     def _parse_retry_after(error: Exception) -> float:

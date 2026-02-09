@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
@@ -127,8 +128,10 @@ class LiteLLMProvider(LLMProvider):
             except Exception as e:
                 last_error = e
                 if attempt < max_attempts - 1:
-                    delay = self.retry_base_delay * (2 ** attempt)
-                    logger.warning(f"LLM call failed (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {delay}s")
+                    base_delay = self.retry_base_delay * (2 ** attempt)
+                    jitter = base_delay * random.uniform(-0.25, 0.25)
+                    delay = base_delay + jitter
+                    logger.warning(f"LLM call failed (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {delay:.2f}s")
                     await asyncio.sleep(delay)
         logger.error(f"LLM call failed after {max_attempts} attempts: {last_error}")
         return LLMResponse(content=f"LLM error: {type(last_error).__name__}", finish_reason="error")

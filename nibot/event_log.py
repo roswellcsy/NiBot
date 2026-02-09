@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,7 +22,6 @@ class EventLog:
     def __init__(self, path: Path, enabled: bool = True) -> None:
         self._path = path
         self._enabled = enabled
-        self._lock = threading.Lock()
 
     def log_llm_call(
         self,
@@ -105,8 +103,7 @@ class EventLog:
         }
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            with self._lock:
-                with self._path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            with self._path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except OSError:
             pass  # never crash the hot path for logging

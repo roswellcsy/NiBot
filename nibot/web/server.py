@@ -33,12 +33,14 @@ class WebPanel:
     """
 
     def __init__(self, app: Any, host: str = "127.0.0.1", port: int = 9200,
-                 auth_token: str = "", rate_limit_rpm: int = 0) -> None:
+                 auth_token: str = "", rate_limit_rpm: int = 0,
+                 cors_origin: str = "") -> None:
         self._app = app
         self._host = host
         self._port = port
         self._auth_token = auth_token
         self._rate_limit_rpm = rate_limit_rpm
+        self._cors_origin = cors_origin
         self._ip_windows: dict[str, deque[float]] = {}
         self._server: asyncio.Server | None = None
         self._static_dir = Path(__file__).parent / "static"
@@ -153,9 +155,10 @@ class WebPanel:
                       403: "Forbidden", 404: "Not Found", 413: "Payload Too Large",
                       429: "Too Many Requests", 503: "Service Unavailable",
                       500: "Error"}.get(status, "OK")
+        cors = f"Access-Control-Allow-Origin: {self._cors_origin}\r\n" if self._cors_origin else ""
         resp = (f"HTTP/1.1 {status} {status_text}\r\n"
                f"Content-Type: application/json\r\n"
-               f"Access-Control-Allow-Origin: *\r\n"
+               f"{cors}"
                f"Content-Length: {len(payload.encode())}\r\n"
                f"Connection: close\r\n\r\n{payload}")
         writer.write(resp.encode())

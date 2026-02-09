@@ -441,3 +441,27 @@ class TestEventLogConfig:
         from nibot.config import NiBotConfig
         config = NiBotConfig(event_log={"enabled": False})
         assert config.event_log.enabled is False
+
+
+class TestEventLogNoThreadingLock:
+    """Phase 3 v1.4: EventLog must not use threading.Lock in asyncio context."""
+
+    def test_no_threading_import(self) -> None:
+        import inspect
+        from nibot import event_log as mod
+        source = inspect.getsource(mod)
+        assert "threading" not in source
+
+    def test_no_lock_attribute(self, tmp_path: Path) -> None:
+        from nibot.event_log import EventLog
+        elog = EventLog(tmp_path / "events.jsonl")
+        assert not hasattr(elog, "_lock")
+
+    def test_concurrent_append_no_data_loss(self, tmp_path: Path) -> None:
+        """100 rapid appends produce exactly 100 lines."""
+        from nibot.event_log import EventLog
+        elog = EventLog(tmp_path / "events.jsonl")
+        for i in range(100):
+            elog.log_tool_call(f"tool_{i}", 1.0, True)
+        lines = (tmp_path / "events.jsonl").read_text().strip().split("\n")
+        assert len(lines) == 100
