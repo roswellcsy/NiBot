@@ -129,7 +129,7 @@ class TestConfigValidation:
     def test_nibot_config_bare_construction_still_works(self) -> None:
         """Existing test pattern: NiBotConfig() must not raise."""
         cfg = NiBotConfig()
-        assert cfg.agent.model == "anthropic/claude-sonnet-4-5-20250929"
+        assert cfg.agent.model == "anthropic/claude-opus-4-6"
 
 
 # ---- B2: Health Check ----

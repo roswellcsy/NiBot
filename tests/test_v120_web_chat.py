@@ -45,8 +45,8 @@ class _StubAgent:
 
 class _StubAgentConfig:
     model: str = "test-model"
-    temperature: float = 0.7
-    max_tokens: int = 4096
+    temperature: float = 1.0
+    max_tokens: int = 16384
     max_iterations: int = 25
 
 

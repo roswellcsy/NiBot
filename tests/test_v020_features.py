@@ -458,7 +458,7 @@ class TestNewConfigFields:
 
     def test_new_agent_config_defaults(self) -> None:
         cfg = NiBotConfig()
-        assert cfg.agent.context_window == 128000
+        assert cfg.agent.context_window == 200000
         assert cfg.agent.context_reserve == 4096
         assert cfg.agent.llm_max_retries == 3
         assert cfg.agent.llm_retry_base_delay == 1.0

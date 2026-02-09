@@ -111,15 +111,15 @@ DEFAULT_AGENT_TYPES: dict[str, AgentTypeConfig] = {
 
 class AgentConfig(BaseModel):
     name: str = "NiBot"
-    model: str = "anthropic/claude-sonnet-4-5-20250929"
-    max_tokens: int = 4096
-    temperature: float = 0.7
+    model: str = "anthropic/claude-opus-4-6"
+    max_tokens: int = 16384
+    temperature: float = 1.0
     max_iterations: int = 20
     workspace: str = "~/.nibot/workspace"
     bootstrap_files: list[str] = Field(
         default=["IDENTITY.md", "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     )
-    context_window: int = 128000
+    context_window: int = 200000
     context_reserve: int = 4096
     llm_max_retries: int = 3
     llm_retry_base_delay: float = 1.0

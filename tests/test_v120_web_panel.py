@@ -23,8 +23,8 @@ class _StubChannel:
 @dataclass
 class _StubAgentConfig:
     model: str = "anthropic/claude-opus-4-6"
-    temperature: float = 0.7
-    max_tokens: int = 4096
+    temperature: float = 1.0
+    max_tokens: int = 16384
     max_iterations: int = 25
 
 
@@ -327,8 +327,8 @@ class TestConfigRoute:
     async def test_config_get(self, tmp_path: Path) -> None:
         result = await handle_route(_app(), "GET", "/api/config", b"", tmp_path)
         assert result["agent"]["model"] == "anthropic/claude-opus-4-6"
-        assert result["agent"]["temperature"] == 0.7
-        assert result["agent"]["max_tokens"] == 4096
+        assert result["agent"]["temperature"] == 1.0
+        assert result["agent"]["max_tokens"] == 16384
         assert result["agent"]["max_iterations"] == 25
 
     @pytest.mark.asyncio

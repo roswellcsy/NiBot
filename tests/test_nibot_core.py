@@ -143,7 +143,7 @@ def test_load_config_invalid_json_falls_back_defaults(tmp_path: Path) -> None:
 
 def test_load_config_default_values() -> None:
     cfg = NiBotConfig()
-    assert cfg.agent.model == "anthropic/claude-sonnet-4-5-20250929"
+    assert cfg.agent.model == "anthropic/claude-opus-4-6"
     assert cfg.agent.max_iterations == 20
     assert cfg.tools.restrict_to_workspace is True
 
