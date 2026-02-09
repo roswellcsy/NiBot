@@ -7,6 +7,7 @@ import socket
 from typing import Any
 from urllib.parse import urlparse
 
+from nibot.log import logger
 from nibot.registry import Tool
 
 
@@ -28,8 +29,11 @@ def _is_private_url(url: str) -> bool:
 
 
 class WebSearchTool(Tool):
-    def __init__(self, api_key: str = "") -> None:
-        self._api_key = api_key
+    """HA web search: Anthropic server-side search (primary) → Brave (fallback)."""
+
+    def __init__(self, api_key: str = "", anthropic_api_key: str = "") -> None:
+        self._brave_api_key = api_key
+        self._anthropic_api_key = anthropic_api_key
 
     @property
     def name(self) -> str:
@@ -37,7 +41,7 @@ class WebSearchTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Search the web using Brave Search API."
+        return "Search the web for current information."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -51,17 +55,81 @@ class WebSearchTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        if not self._api_key:
-            return "Web search not configured (missing API key)."
-        import httpx
-
         query = kwargs["query"]
         count = kwargs.get("count", 5)
+
+        # Primary: Anthropic built-in web search (server-side, via Haiku)
+        if self._anthropic_api_key:
+            try:
+                result = await self._anthropic_search(query, count)
+                if result:
+                    return result
+            except Exception as e:
+                logger.warning(f"Anthropic web search failed: {e}, falling back to Brave")
+
+        # Fallback: Brave Search API
+        if self._brave_api_key:
+            try:
+                return await self._brave_search(query, count)
+            except Exception as e:
+                logger.warning(f"Brave web search failed: {e}")
+                return f"Web search error: {e}"
+
+        return "Web search not configured (missing API key)."
+
+    async def _anthropic_search(self, query: str, count: int) -> str:
+        """Use Anthropic Messages API with built-in web_search tool (Haiku for cost)."""
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": self._anthropic_api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 1024,
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            f"Search the web for: {query}\n"
+                            f"Return the top {count} results. For each result, provide:\n"
+                            f"- Title (bold)\n- URL\n- Brief description\n"
+                            f"Be concise. Use the web search tool."
+                        ),
+                    }],
+                    "tools": [{
+                        "type": "web_search_20250305",
+                        "name": "web_search",
+                        "max_uses": 3,
+                    }],
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Extract text blocks from response content
+        texts = []
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                text = block.get("text", "").strip()
+                if text:
+                    texts.append(text)
+        return "\n".join(texts)
+
+    async def _brave_search(self, query: str, count: int) -> str:
+        """Brave Search API fallback."""
+        import httpx
+
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 "https://api.search.brave.com/res/v1/web/search",
                 params={"q": query, "count": count},
-                headers={"X-Subscription-Token": self._api_key, "Accept": "application/json"},
+                headers={"X-Subscription-Token": self._brave_api_key, "Accept": "application/json"},
                 timeout=15,
             )
             resp.raise_for_status()

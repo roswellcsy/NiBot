@@ -314,7 +314,10 @@ class NiBot:
             ExecTool(ws, timeout=self.config.tools.exec_timeout,
                     sandbox_enabled=self.config.tools.sandbox_enabled,
                     sandbox_memory_mb=self.config.tools.sandbox_memory_mb),
-            WebSearchTool(api_key=self.config.tools.web_search_api_key),
+            WebSearchTool(
+                api_key=self.config.tools.web_search_api_key,
+                anthropic_api_key=self.config.providers.anthropic.api_key,
+            ),
             WebFetchTool(),
             MessageTool(self.bus),
             GitTool(self.worktree_mgr),

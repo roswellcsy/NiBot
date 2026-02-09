@@ -91,17 +91,22 @@ def _session_messages(app: Any, key: str, limit: int = 50) -> dict[str, Any]:
     if not key:
         return {"error": "key parameter required"}
     messages = app.sessions.get_session_messages(key, limit=limit)
+    filtered = []
+    for m in messages:
+        content = (m.get("content") or "").strip()
+        role = m.get("role", "")
+        # Skip empty assistant tool_call wrappers and empty tool results
+        if not content and role in ("assistant", "tool"):
+            continue
+        filtered.append({
+            "role": role,
+            "content": (m.get("content") or "")[:2000],
+            "timestamp": m.get("timestamp", ""),
+        })
     return {
         "key": key,
-        "messages": [
-            {
-                "role": m.get("role", ""),
-                "content": (m.get("content") or "")[:2000],
-                "timestamp": m.get("timestamp", ""),
-            }
-            for m in messages
-        ],
-        "total": len(messages),
+        "messages": filtered,
+        "total": len(filtered),
     }
 
 
@@ -303,5 +308,6 @@ def _chat_history(app: Any, chat_id: str, limit: int = 50) -> dict[str, Any]:
             }
             for m in messages
             if m.get("role") in ("user", "assistant")
+            and (m.get("content") or "").strip()
         ],
     }

@@ -259,3 +259,193 @@ class TestErrorSanitization:
             assert "api_key" not in result.content
         finally:
             litellm.acompletion = original
+
+
+# ---- HA Web Search ----
+
+
+def _mock_httpx_client(post_fn=None, get_fn=None):
+    """Create a mock httpx.AsyncClient context manager."""
+    from unittest.mock import patch
+
+    mock_client = MagicMock()
+    if post_fn:
+        mock_client.post = AsyncMock(side_effect=post_fn)
+    if get_fn:
+        mock_client.get = AsyncMock(side_effect=get_fn)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    return patch("httpx.AsyncClient", return_value=mock_client), mock_client
+
+
+class TestWebSearchHA:
+    """HA web search: Anthropic (primary) → Brave (fallback)."""
+
+    @pytest.mark.asyncio
+    async def test_anthropic_primary_success(self) -> None:
+        """When Anthropic search succeeds, Brave is not called."""
+        from nibot.tools.web_tools import WebSearchTool
+
+        tool = WebSearchTool(api_key="brave-key", anthropic_api_key="ant-key")
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.raise_for_status = MagicMock()
+        fake_resp.json.return_value = {
+            "content": [
+                {"type": "text", "text": "Here are results:"},
+                {"type": "server_tool_use", "id": "x", "name": "web_search", "input": {"query": "test"}},
+                {"type": "web_search_tool_result", "tool_use_id": "x", "content": []},
+                {"type": "text", "text": "**Result 1**\nhttps://example.com\nA test result"},
+            ],
+        }
+
+        async def mock_post(*args, **kwargs):
+            return fake_resp
+
+        patcher, _ = _mock_httpx_client(post_fn=mock_post)
+        with patcher:
+            result = await tool.execute(query="test query", count=3)
+
+        assert "Result 1" in result
+        assert "example.com" in result
+
+    @pytest.mark.asyncio
+    async def test_anthropic_fails_brave_fallback(self) -> None:
+        """When Anthropic fails, Brave search is used as fallback."""
+        from nibot.tools.web_tools import WebSearchTool
+
+        tool = WebSearchTool(api_key="brave-key", anthropic_api_key="ant-key")
+        call_count = {"post": 0, "get": 0}
+
+        brave_resp = MagicMock()
+        brave_resp.status_code = 200
+        brave_resp.raise_for_status = MagicMock()
+        brave_resp.json.return_value = {
+            "web": {"results": [
+                {"title": "Brave Result", "url": "https://brave.com", "description": "From Brave"},
+            ]},
+        }
+
+        async def mock_post(*args, **kwargs):
+            call_count["post"] += 1
+            raise ConnectionError("Anthropic unreachable")
+
+        async def mock_get(*args, **kwargs):
+            call_count["get"] += 1
+            return brave_resp
+
+        # Anthropic call (post) fails, then Brave call (get) succeeds
+        # Need two separate client instances since each method creates its own
+        import httpx
+
+        class _FakeClient:
+            def __init__(self, **kw: Any) -> None:
+                pass
+            async def __aenter__(self) -> "_FakeClient":
+                return self
+            async def __aexit__(self, *a: Any) -> bool:
+                return False
+            async def post(self, *a: Any, **kw: Any) -> Any:
+                call_count["post"] += 1
+                raise ConnectionError("Anthropic unreachable")
+            async def get(self, *a: Any, **kw: Any) -> Any:
+                call_count["get"] += 1
+                return brave_resp
+
+        from unittest.mock import patch
+        with patch("httpx.AsyncClient", _FakeClient):
+            result = await tool.execute(query="test", count=3)
+
+        assert "Brave Result" in result
+        assert call_count["post"] == 1  # Anthropic tried
+        assert call_count["get"] == 1   # Brave succeeded
+
+    @pytest.mark.asyncio
+    async def test_brave_only_when_no_anthropic_key(self) -> None:
+        """Without Anthropic key, only Brave is used."""
+        from nibot.tools.web_tools import WebSearchTool
+
+        tool = WebSearchTool(api_key="brave-key", anthropic_api_key="")
+
+        brave_resp = MagicMock()
+        brave_resp.status_code = 200
+        brave_resp.raise_for_status = MagicMock()
+        brave_resp.json.return_value = {
+            "web": {"results": [
+                {"title": "Only Brave", "url": "https://b.com", "description": "Brave only"},
+            ]},
+        }
+
+        patcher, _ = _mock_httpx_client(get_fn=lambda *a, **kw: brave_resp)
+        with patcher:
+            result = await tool.execute(query="test")
+
+        assert "Only Brave" in result
+
+    @pytest.mark.asyncio
+    async def test_no_keys_returns_error(self) -> None:
+        """No API keys → error message."""
+        from nibot.tools.web_tools import WebSearchTool
+
+        tool = WebSearchTool(api_key="", anthropic_api_key="")
+        result = await tool.execute(query="test")
+        assert "not configured" in result
+
+    @pytest.mark.asyncio
+    async def test_both_fail_returns_error(self) -> None:
+        """Both providers fail → error message."""
+        from nibot.tools.web_tools import WebSearchTool
+        import httpx
+
+        tool = WebSearchTool(api_key="brave-key", anthropic_api_key="ant-key")
+
+        class _FailClient:
+            def __init__(self, **kw: Any) -> None:
+                pass
+            async def __aenter__(self) -> "_FailClient":
+                return self
+            async def __aexit__(self, *a: Any) -> bool:
+                return False
+            async def post(self, *a: Any, **kw: Any) -> Any:
+                raise ConnectionError("Anthropic down")
+            async def get(self, *a: Any, **kw: Any) -> Any:
+                raise ConnectionError("Brave down")
+
+        from unittest.mock import patch
+        with patch("httpx.AsyncClient", _FailClient):
+            result = await tool.execute(query="test")
+
+        assert "error" in result.lower() or "Brave down" in result
+
+    @pytest.mark.asyncio
+    async def test_anthropic_search_sends_correct_payload(self) -> None:
+        """Verify Anthropic search sends correct model, tools, and prompt."""
+        from nibot.tools.web_tools import WebSearchTool
+
+        tool = WebSearchTool(api_key="", anthropic_api_key="test-ant-key")
+        captured: dict[str, Any] = {}
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.raise_for_status = MagicMock()
+        fake_resp.json.return_value = {
+            "content": [{"type": "text", "text": "search results here"}],
+        }
+
+        async def mock_post(url, **kwargs):
+            captured["url"] = url
+            captured["headers"] = kwargs.get("headers", {})
+            captured["json"] = kwargs.get("json", {})
+            return fake_resp
+
+        patcher, _ = _mock_httpx_client(post_fn=mock_post)
+        with patcher:
+            await tool.execute(query="python web framework", count=5)
+
+        assert "anthropic.com" in captured["url"]
+        assert captured["headers"]["x-api-key"] == "test-ant-key"
+        payload = captured["json"]
+        assert payload["model"] == "claude-haiku-4-5-20251001"
+        assert payload["tools"][0]["type"] == "web_search_20250305"
+        assert "python web framework" in payload["messages"][0]["content"]
