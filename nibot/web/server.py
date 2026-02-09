@@ -52,6 +52,9 @@ class WebPanel:
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         sse_handled = False
+        peer = writer.get_extra_info("peername", ("?", 0))
+        method = "?"
+        path = "?"
         try:
             line = await asyncio.wait_for(reader.readline(), timeout=5.0)
             parts = line.decode("utf-8", errors="replace").split()
@@ -109,8 +112,15 @@ class WebPanel:
                 await self._respond(writer, result, status=status_code)
             if not sse_handled:
                 await writer.drain()
+                logger.debug(f"web {peer[0]} {method} {path} -> {status_code if 'status_code' in dir() else 200}")
+            else:
+                logger.debug(f"web {peer[0]} {method} {path} -> SSE")
+        except asyncio.TimeoutError:
+            logger.warning(f"web {peer[0]} {method} {path} -> timeout (read)")
+        except ConnectionError as e:
+            logger.info(f"web {peer[0]} {method} {path} -> connection lost: {e}")
         except Exception as e:
-            logger.debug(f"Web panel error: {e}")
+            logger.warning(f"web {peer[0]} {method} {path} -> error: {e}")
         finally:
             if not sse_handled:
                 writer.close()

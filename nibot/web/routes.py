@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from nibot.log import logger
 from nibot.types import Envelope
 
 
@@ -255,8 +256,10 @@ def _chat_stream(app: Any, stream_id: str) -> Any:
                 event = json.dumps(item, ensure_ascii=False)
                 writer.write(f"data: {event}\n\n".encode())
                 await writer.drain()
-        except (asyncio.TimeoutError, ConnectionError, OSError):
-            pass
+        except asyncio.TimeoutError:
+            logger.info(f"SSE {stream_id} closed: idle timeout")
+        except (ConnectionError, OSError) as e:
+            logger.info(f"SSE {stream_id} closed: client disconnected ({e})")
         finally:
             streams.pop(stream_id, None)
             writer.close()
