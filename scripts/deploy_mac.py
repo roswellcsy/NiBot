@@ -65,8 +65,8 @@ def generate_config(
         "agent": {
             "model": f"ollama/{local_model}" if not cloud_provider else cloud_provider,
             "workspace": workspace,
-            "max_tokens": 4096,
-            "temperature": 0.7,
+            "max_tokens": 16384,
+            "temperature": 1.0,
         },
         "providers": {
             "ollama": {
@@ -95,7 +95,7 @@ def generate_config(
     if cloud_api_key:
         if "anthropic" in (cloud_provider or "").lower() or "claude" in (cloud_provider or "").lower():
             config["providers"]["anthropic"] = {"api_key": cloud_api_key}
-            config["agent"]["model"] = cloud_provider or "anthropic/claude-sonnet-4-5-20250929"
+            config["agent"]["model"] = cloud_provider or "anthropic/claude-opus-4-6"
         elif "openai" in (cloud_provider or "").lower() or "gpt" in (cloud_provider or "").lower():
             config["providers"]["openai"] = {"api_key": cloud_api_key}
             config["agent"]["model"] = cloud_provider or "gpt-4o"
@@ -147,7 +147,7 @@ def main() -> None:
     cloud_key = input("Cloud API key (leave empty for local-only): ").strip()
     cloud_provider = ""
     if cloud_key:
-        cloud_provider = input("Cloud provider model (e.g. anthropic/claude-sonnet-4-5-20250929): ").strip()
+        cloud_provider = input("Cloud provider model (e.g. anthropic/claude-opus-4-6): ").strip()
 
     config = generate_config(
         cloud_provider=cloud_provider,
