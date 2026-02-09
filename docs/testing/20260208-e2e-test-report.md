@@ -1,7 +1,8 @@
 # NiBot E2E Test Report
 
-- **Date**: 2026-02-08
+- **Date**: 2026-02-09 (final run)
 - **Target**: Mac Mini M4 (192.168.5.55), Docker deployment
+- **Image**: `nibot-nibot:latest` (proper `docker compose build`, not `docker commit`)
 - **Model**: anthropic/claude-sonnet-4-5-20250929
 - **API Endpoint**: http://192.168.5.55:8080/api/chat
 
@@ -10,10 +11,10 @@
 | Metric | Value |
 |--------|-------|
 | Total tests | 38 |
-| Passed | 36 |
-| Failed | 2 |
-| Pass rate | 94% |
-| Duration | 195s |
+| Passed | 38 |
+| Failed | 0 |
+| Pass rate | **100%** |
+| Duration | 196s |
 
 ## Test Categories
 
@@ -21,7 +22,7 @@
 |----------|-------|--------|--------|
 | A: Basic Intelligence | 5 | 5 | PASS |
 | K: Error Handling (quick) | 4 | 4 | PASS |
-| B: File Operations | 7 | 5 | 2 FAIL |
+| B: File Operations | 7 | 7 | PASS |
 | C: Shell & System | 6 | 6 | PASS |
 | D: Web & Information | 2 | 2 | PASS |
 | H: Admin Operations | 4 | 4 | PASS |
@@ -32,18 +33,15 @@
 | L: Cross-tool Composite | 1 | 1 | PASS |
 | K: Concurrency | 1 | 1 | PASS |
 
-## Failures
+## Test Run History
 
-### B-04: Edit file
-- **Response**: `LLM error: BadRequestError`
-- **Root cause**: Claude API returned 400 error on 4th multi-turn message in same session (`e2e_fileops`). Likely context accumulation hitting Claude Code credential proxy limits.
-- **Impact**: Non-critical, intermittent. Works independently, fails when session context grows.
+| Run | Time | Passed | Failed | Rate | Notes |
+|-----|------|--------|--------|------|-------|
+| 1 | 2026-02-08 19:01 | 36 | 2 | 94% | B-04/B-05 fail (Claude API BadRequestError in accumulated session) |
+| 2 | 2026-02-09 00:23 | 37 | 1 | 97% | A-05 fail (macOS grep -P incompatibility) |
+| 3 | 2026-02-09 00:31 | 38 | 0 | **100%** | All pass after proper image rebuild + grep fix |
 
-### B-05: Read edited file
-- **Response**: File still contains original "Hello from E2E test"
-- **Root cause**: Cascading failure from B-04 -- edit never happened.
-
-## Bugs Found & Fixed
+## Bugs Found & Fixed During Testing
 
 ### Critical: Streaming response_key waiter deadlock (agent.py)
 - **Symptom**: First API request works, all subsequent requests with responses >= 30 chars timeout with 504.
@@ -57,16 +55,32 @@
 - **Fix**: Renamed tool from `read_file` to `file_read` across 11 files.
 - **Commit**: `32fbf84`
 
+### Minor: macOS grep -P incompatibility in E2E test script
+- **Symptom**: A-05 (Multilingual/CJK) always fails on macOS.
+- **Root cause**: `grep -P` (Perl regex) is GNU-only; macOS BSD grep doesn't support it.
+- **Fix**: Replaced `grep -P` with `python3` for CJK detection and `grep -E` for regex checks.
+- **Commit**: `6e83301`
+
+### Minor: Bash `((PASS++))` exits under `set -e` when PASS=0
+- **Symptom**: E2E script exits after first test passes.
+- **Root cause**: `((0++))` evaluates to 0 (falsy), returning exit code 1 under `set -e`.
+- **Fix**: Changed to `PASS=$((PASS + 1))`.
+- **Commit**: `28d46df`
+
 ## Infrastructure Notes
 
-- Docker proxy must use `host.docker.internal:10808` (not `127.0.0.1`)
-- Docker Desktop's `~/.docker/config.json` injects lowercase proxy vars
-- E2E test script needs `unset http_proxy` for LAN testing
-- macOS keychain must be unlocked for Docker build via SSH
-- `docker compose restart` preserves `docker cp` changes (no rebuild needed)
+- Docker proxy: `~/.docker/config.json` with `host.docker.internal:10808` enables Docker Hub access
+- Docker build via SSH: temporarily remove `credsStore` from config.json (macOS keychain locked in SSH)
+- Git proxy on Mac Mini: `git config http.proxy http://127.0.0.1:10808` for GitHub access
+- E2E test script: `unset http_proxy` needed for LAN testing from Mac Mini
+- Docker Desktop restart: force-kill all Docker processes, then `open -a Docker`
+- Docker command path: `/usr/local/bin/docker` (not in default SSH PATH)
 
 ## Test Script
 
 `scripts/e2e_test.sh` -- automated bash script with curl-based API testing.
 - Usage: `bash scripts/e2e_test.sh [API_URL]`
+- Default API: `http://192.168.5.55:8080/api/chat`
 - Output: JSON results to `e2e_results.json`
+- 38 test cases across 12 categories
+- Supports: health check, basic intelligence, file ops, shell commands, web fetch, admin, code quality, scaffolding, analytics, multi-turn conversation, cross-tool composite, concurrency
