@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,16 +23,51 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
-    def add_message(self, role: str, content: str, **kwargs: Any) -> None:
-        self.messages.append(
-            {"role": role, "content": content, "timestamp": datetime.now().isoformat(), **kwargs}
-        )
+    compacted_summary: str = ""
+
+    def add_message(self, role: str, content: str, parent_id: str = "", **kwargs: Any) -> str:
+        """Append a message and return its unique id."""
+        msg_id = uuid.uuid4().hex[:12]
+        last_id = ""
+        if not parent_id and self.messages:
+            last_msg = self.messages[-1]
+            last_id = last_msg.get("id", "")
+            # Backfill legacy message missing id so branch tracing works
+            if not last_id:
+                last_id = f"_legacy_{len(self.messages) - 1}"
+                last_msg["id"] = last_id
+        self.messages.append({
+            "id": msg_id,
+            "parent_id": parent_id or last_id,
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now().isoformat(),
+            **kwargs,
+        })
         self.updated_at = datetime.now()
+        return msg_id
 
     def get_history(self, max_messages: int = 50) -> list[dict[str, Any]]:
         """Return recent messages in LLM dict format, preserving tool_calls/tool_call_id."""
         recent = self.messages[-max_messages:]
-        return [{k: v for k, v in m.items() if k != "timestamp"} for m in recent]
+        return [{k: v for k, v in m.items() if k not in ("timestamp", "id", "parent_id")} for m in recent]
+
+    def get_branch(self, leaf_id: str = "") -> list[dict[str, Any]]:
+        """Trace from leaf back to root, return linear path as LLM messages.
+
+        Falls back to get_history() when leaf_id is empty or messages lack ids
+        (backward compat with old sessions).
+        """
+        if not leaf_id or not any(m.get("id") for m in self.messages):
+            return self.get_history()
+        by_id = {m["id"]: m for m in self.messages if "id" in m}
+        chain: list[dict[str, Any]] = []
+        current = leaf_id
+        while current and current in by_id:
+            chain.append(by_id[current])
+            current = by_id[current].get("parent_id", "")
+        chain.reverse()
+        return [{k: v for k, v in m.items() if k not in ("timestamp", "id", "parent_id")} for m in chain]
 
     def clear(self) -> None:
         self.messages.clear()
@@ -80,12 +116,14 @@ class SessionManager:
         """Persist session to JSONL file. No cache interaction."""
         path = self._path_for(session.key)
         with open(path, "w", encoding="utf-8") as f:
-            meta = {
+            meta: dict[str, Any] = {
                 "_type": "metadata",
                 "key": session.key,
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
             }
+            if session.compacted_summary:
+                meta["compacted_summary"] = session.compacted_summary
             f.write(json.dumps(meta, ensure_ascii=False) + "\n")
             for msg in session.messages:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
@@ -107,6 +145,7 @@ class SessionManager:
         messages: list[dict[str, Any]] = []
         created_at = None
         updated_at = None
+        compacted_summary = ""
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -116,13 +155,17 @@ class SessionManager:
                     created_at = datetime.fromisoformat(data["created_at"])
                     if "updated_at" in data:
                         updated_at = datetime.fromisoformat(data["updated_at"])
+                    compacted_summary = data.get("compacted_summary", "")
                 else:
                     messages.append(data)
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning(f"Corrupt session file {path}: {e}")
             return None
         ca = created_at or datetime.now()
-        return Session(key=key, messages=messages, created_at=ca, updated_at=updated_at or ca)
+        return Session(
+            key=key, messages=messages, created_at=ca,
+            updated_at=updated_at or ca, compacted_summary=compacted_summary,
+        )
 
     def iter_recent_from_disk(self, limit: int = 50) -> list[Session]:
         """Read sessions from disk sorted by mtime, WITHOUT caching them.

@@ -71,6 +71,8 @@ class NiBot:
             memory=self.memory,
             skills=self.skills,
             workspace=workspace,
+            provider=self.provider,
+            sessions=self.sessions,
         )
         self.evolution_log = EvolutionLog(workspace)
         # Build quota configs from provider settings
@@ -409,6 +411,7 @@ class NiBot:
                     "iteration": meta.get("iteration", 0),
                     "max_iterations": meta.get("max_iterations", 0),
                     "elapsed": meta.get("elapsed", 0),
+                    "partial_args": meta.get("partial_args", ""),
                 })
                 return
             if meta.get("streaming"):

@@ -30,6 +30,15 @@ class ToolCall:
 
 
 @dataclass
+class ToolCallDelta:
+    """Streaming tool call intermediate state for progressive UI display."""
+
+    index: int
+    name: str
+    partial_args: str
+
+
+@dataclass
 class ToolResult:
     """Tool execution result."""
 

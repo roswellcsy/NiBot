@@ -436,6 +436,8 @@ function dashboard(){return{
             this.chatProgress='Calling '+data.tool_name+'...';
           }else if(data.event==='tool_done'){
             this.chatProgress=data.tool_name+' done ('+data.elapsed+'s)';
+          }else if(data.event==='tool_args_delta'){
+            this.chatProgress='Building args for '+data.tool_name+'...';
           }
         }else if(data.type==='chunk'){
           this.chatStreamContent=data.content||'';

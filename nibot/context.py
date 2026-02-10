@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import mimetypes
@@ -10,8 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from nibot.config import NiBotConfig
+from nibot.log import logger
 from nibot.memory import MemoryStore
-from nibot.session import Session
+from nibot.session import Session, SessionManager
 from nibot.skills import SkillsLoader
 from nibot.types import Envelope
 
@@ -29,17 +31,25 @@ def _estimate_tokens(messages: list[dict[str, Any]], model: str = "") -> int:
 class ContextBuilder:
     """Assemble LLM message list from session history, memory, and skills."""
 
+    COMPACT_DROP_THRESHOLD = 10  # trigger compact when this many messages are dropped
+
     def __init__(
         self,
         config: NiBotConfig,
         memory: MemoryStore,
         skills: SkillsLoader,
         workspace: Path,
+        provider: Any | None = None,
+        sessions: SessionManager | None = None,
     ) -> None:
         self.config = config
         self.memory = memory
         self.skills = skills
         self.workspace = workspace
+        self._provider = provider
+        self._sessions = sessions
+        self._compact_tasks: set[asyncio.Task[Any]] = set()
+        self._compacting_sessions: set[str] = set()
 
     def build(self, session: Session, current: Envelope) -> list[dict[str, Any]]:
         system_msg = {
@@ -66,7 +76,27 @@ class ContextBuilder:
             used += cost
         kept.reverse()
 
-        return [system_msg] + kept + [user_msg]
+        dropped_count = len(all_history) - len(kept)
+
+        result = [system_msg]
+        if session.compacted_summary:
+            result.append({
+                "role": "system",
+                "content": f"[Earlier conversation summary]\n{session.compacted_summary}",
+            })
+        result += kept + [user_msg]
+
+        # Schedule background compaction when many messages are silently dropped
+        if (
+            dropped_count > self.COMPACT_DROP_THRESHOLD
+            and not session.compacted_summary
+            and self._provider
+            and session.key not in self._compacting_sessions
+        ):
+            dropped = all_history[:dropped_count]
+            self._schedule_compact(session.key, dropped)
+
+        return result
 
     def _build_system_prompt(self, channel: str = "", chat_id: str = "") -> str:
         sections: list[str] = []
@@ -141,6 +171,30 @@ class ContextBuilder:
             if budget <= 0:
                 break
         return "\n\n".join(parts)
+
+    def _schedule_compact(self, session_key: str, dropped: list[dict[str, Any]]) -> None:
+        """Fire-and-forget: summarize dropped messages and save to session."""
+        self._compacting_sessions.add(session_key)
+
+        async def _do_compact() -> None:
+            try:
+                from nibot.compact import compact_messages
+
+                summary = await compact_messages(dropped, self._provider)
+                if not summary:
+                    return
+                if not self._sessions:
+                    return
+                session = self._sessions.get_or_create(session_key)
+                session.compacted_summary = summary
+                self._sessions.save(session)
+                logger.info(f"Auto-compact: saved summary for {session_key} ({len(summary)} chars)")
+            finally:
+                self._compacting_sessions.discard(session_key)
+
+        task = asyncio.create_task(_do_compact())
+        self._compact_tasks.add(task)
+        task.add_done_callback(self._compact_tasks.discard)
 
     def _encode_media(self, path: str) -> str | None:
         p = Path(path)

@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from nibot.log import logger
-from nibot.types import LLMResponse, ToolCall
+from nibot.types import LLMResponse, ToolCall, ToolCallDelta
 
 
 class LLMProvider(ABC):
@@ -143,22 +143,13 @@ class LiteLLMProvider(LLMProvider):
         model: str = "",
         max_tokens: int = 0,
         temperature: float = -1.0,
-    ) -> AsyncIterator[str | LLMResponse]:
-        """Stream text chunks, then yield final LLMResponse.
+    ) -> AsyncIterator[str | ToolCallDelta | LLMResponse]:
+        """Stream text/tool-call chunks, then yield final LLMResponse.
 
-        When tools are present, falls back to non-streaming chat().
-        Yields LLMResponse with tool_calls if LLM chose to call tools.
+        Bypasses LiteLLM's stream_chunk_builder for tool calls (known bugs).
+        Self-accumulates tool_call deltas from raw stream. Falls back to
+        non-streaming chat() if streaming with tools fails.
         """
-        if tools:
-            resp = await self.chat(messages, tools, model, max_tokens, temperature)
-            if resp.has_tool_calls:
-                yield resp
-                return
-            if resp.content:
-                yield resp.content
-            yield resp
-            return
-
         from litellm import acompletion
 
         model = model or self.model
@@ -173,18 +164,79 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        if tools:
+            kwargs["tools"] = tools
+
         try:
             resp = await acompletion(**kwargs)
-            full: list[str] = []
+            full_content: list[str] = []
+            tc_acc: dict[int, dict[str, Any]] = {}  # index -> {id, name, args_parts}
+
             async for chunk in resp:
                 delta = chunk.choices[0].delta
+
+                # Text delta
                 if hasattr(delta, "content") and delta.content:
-                    full.append(delta.content)
+                    full_content.append(delta.content)
                     yield delta.content
-            yield LLMResponse(content="".join(full))
+
+                # Tool call delta (self-accumulated)
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tc_acc:
+                            tc_acc[idx] = {
+                                "id": getattr(tc_delta, "id", "") or "",
+                                "name": "",
+                                "args_parts": [],
+                            }
+                        acc = tc_acc[idx]
+                        if acc["id"] == "" and getattr(tc_delta, "id", ""):
+                            acc["id"] = tc_delta.id
+                        fn = getattr(tc_delta, "function", None)
+                        if fn:
+                            if getattr(fn, "name", None):
+                                acc["name"] = fn.name
+                            if getattr(fn, "arguments", None):
+                                acc["args_parts"].append(fn.arguments)
+                        yield ToolCallDelta(
+                            index=idx,
+                            name=acc["name"],
+                            partial_args="".join(acc["args_parts"]),
+                        )
+
+            # Assemble final tool calls
+            tool_calls: list[ToolCall] = []
+            for idx in sorted(tc_acc):
+                acc = tc_acc[idx]
+                args_str = "".join(acc["args_parts"])
+                try:
+                    args = json.loads(args_str)
+                except json.JSONDecodeError:
+                    args = {"raw": args_str} if args_str else {}
+                tool_calls.append(ToolCall(
+                    id=acc["id"], name=acc["name"], arguments=args,
+                ))
+
+            yield LLMResponse(
+                content="".join(full_content) or None,
+                tool_calls=tool_calls,
+            )
+
         except Exception as e:
-            logger.error(f"LLM stream failed: {e}")
-            yield LLMResponse(content=f"LLM error: {type(e).__name__}", finish_reason="error")
+            if tools:
+                # Fallback: streaming with tools failed, retry non-streaming
+                logger.warning(f"Stream+tools failed, falling back to non-stream: {e}")
+                resp = await self.chat(messages, tools, model, max_tokens, temperature)
+                if resp.has_tool_calls:
+                    yield resp
+                    return
+                if resp.content:
+                    yield resp.content
+                yield resp
+            else:
+                logger.error(f"LLM stream failed: {e}")
+                yield LLMResponse(content=f"LLM error: {type(e).__name__}", finish_reason="error")
 
     def _parse(self, resp: Any) -> LLMResponse:
         choice = resp.choices[0]
